@@ -20,6 +20,8 @@ from bot.utils.formatters import (
 )
 from bot.utils.keyboards import (
     get_back_to_main_keyboard,
+    get_container_detail_keyboard,
+    get_container_list_keyboard,
     get_docker_back_keyboard,
     get_docker_menu_keyboard,
     get_main_menu_keyboard,
@@ -50,4 +52,6 @@ __all__ = [
     "get_back_to_main_keyboard",
     "get_docker_menu_keyboard",
     "get_docker_back_keyboard",
+    "get_container_list_keyboard",
+    "get_container_detail_keyboard",
 ]

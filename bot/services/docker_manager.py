@@ -32,6 +32,28 @@ class ContainerInfo:
     ports: Optional[str] = None
 
 
+@dataclass
+class ContainerDetail:
+    """Detailed container information."""
+    id: str
+    short_id: str
+    name: str
+    image: str
+    status: str
+    health: Optional[str] = None
+    ports: Optional[str] = None
+    created: Optional[str] = None
+    started: Optional[str] = None
+    ip_address: Optional[str] = None
+    cpu_percent: Optional[float] = None
+    memory_mb: Optional[float] = None
+    memory_limit_mb: Optional[float] = None
+    memory_percent: Optional[float] = None
+    restart_count: int = 0
+    command: Optional[str] = None
+    environment: Optional[List[str]] = None
+
+
 class DockerManager:
     """Manager for Docker operations."""
 
@@ -192,3 +214,135 @@ class DockerManager:
             'dead': '💀',
         }
         return status_emojis.get(status, '❓')
+
+    def get_container_by_id(self, container_id: str) -> Optional[ContainerDetail]:
+        """
+        Get detailed information about a specific container.
+        
+        Args:
+            container_id: Container ID (short or full)
+            
+        Returns:
+            ContainerDetail object or None if not found
+        """
+        if not self.is_available():
+            return None
+        
+        try:
+            container = self._client.containers.get(container_id)
+            attrs = container.attrs
+            config = attrs.get('Config', {})
+            state = attrs.get('State', {})
+            host_config = attrs.get('HostConfig', {})
+            network_settings = attrs.get('NetworkSettings', {})
+            
+            # Get health status
+            health = None
+            if 'Health' in state:
+                health = state['Health'].get('Status')
+            
+            # Get port mappings
+            ports = self._format_ports(container.ports)
+            
+            # Get image name
+            image_tags = container.image.tags
+            image = image_tags[0] if image_tags else container.image.short_id
+            
+            # Get IP address
+            ip_address = None
+            networks = network_settings.get('Networks', {})
+            for net_name, net_info in networks.items():
+                if net_info.get('IPAddress'):
+                    ip_address = net_info['IPAddress']
+                    break
+            
+            # Get timestamps
+            created = attrs.get('Created', '')[:19].replace('T', ' ') if attrs.get('Created') else None
+            started = state.get('StartedAt', '')[:19].replace('T', ' ') if state.get('StartedAt') else None
+            
+            # Get restart count
+            restart_count = attrs.get('RestartCount', 0)
+            
+            # Get command
+            cmd = config.get('Cmd')
+            command = ' '.join(cmd) if cmd else None
+            
+            # Get CPU and memory stats if running
+            cpu_percent = None
+            memory_mb = None
+            memory_limit_mb = None
+            memory_percent = None
+            
+            if container.status == 'running':
+                try:
+                    stats = container.stats(stream=False)
+                    
+                    # CPU calculation
+                    cpu_stats = stats.get('cpu_stats', {})
+                    precpu_stats = stats.get('precpu_stats', {})
+                    
+                    cpu_delta = cpu_stats.get('cpu_usage', {}).get('total_usage', 0) - \
+                                precpu_stats.get('cpu_usage', {}).get('total_usage', 0)
+                    system_delta = cpu_stats.get('system_cpu_usage', 0) - \
+                                   precpu_stats.get('system_cpu_usage', 0)
+                    online_cpus = cpu_stats.get('online_cpus', 1)
+                    
+                    if system_delta > 0 and cpu_delta > 0:
+                        cpu_percent = round((cpu_delta / system_delta) * online_cpus * 100, 2)
+                    
+                    # Memory calculation
+                    memory_stats = stats.get('memory_stats', {})
+                    usage = memory_stats.get('usage', 0)
+                    limit = memory_stats.get('limit', 0)
+                    
+                    if usage > 0:
+                        memory_mb = round(usage / (1024 * 1024), 2)
+                    if limit > 0:
+                        memory_limit_mb = round(limit / (1024 * 1024), 2)
+                        if usage > 0:
+                            memory_percent = round((usage / limit) * 100, 2)
+                except Exception as e:
+                    logger.debug(f"Could not get stats for container {container.name}: {e}")
+            
+            return ContainerDetail(
+                id=container.id,
+                short_id=container.short_id,
+                name=container.name,
+                image=image,
+                status=container.status,
+                health=health,
+                ports=ports,
+                created=created,
+                started=started,
+                ip_address=ip_address,
+                cpu_percent=cpu_percent,
+                memory_mb=memory_mb,
+                memory_limit_mb=memory_limit_mb,
+                memory_percent=memory_percent,
+                restart_count=restart_count,
+                command=command,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error getting container {container_id}: {e}")
+            return None
+
+    def get_containers_page(self, page: int = 0, per_page: int = 10) -> tuple:
+        """
+        Get a page of containers.
+        
+        Args:
+            page: Page number (0-indexed)
+            per_page: Number of containers per page
+            
+        Returns:
+            Tuple of (containers_list, total_count, total_pages)
+        """
+        all_containers = self.list_containers(all_containers=True)
+        total = len(all_containers)
+        total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+        
+        start = page * per_page
+        end = start + per_page
+        
+        return all_containers[start:end], total, total_pages

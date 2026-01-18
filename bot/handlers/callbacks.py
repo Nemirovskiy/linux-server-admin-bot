@@ -14,6 +14,8 @@ from bot.utils import (
     format_system_status,
     format_top_processes,
     get_back_to_main_keyboard,
+    get_container_detail_keyboard,
+    get_container_list_keyboard,
     get_docker_back_keyboard,
     get_docker_menu_keyboard,
     get_main_menu_keyboard,
@@ -95,8 +97,19 @@ class CallbackHandlers:
             # Docker commands
             elif data == "cmd_docker":
                 await self._handle_docker(query)
-            elif data == "docker_list":
-                await self._handle_docker_list(query)
+            elif data == "docker_list" or data.startswith("docker_list|"):
+                page = 0
+                if "|" in data:
+                    page = int(data.split("|")[1])
+                await self._handle_docker_list(query, page)
+            elif data.startswith("docker_page|"):
+                page = int(data.split("|")[1])
+                await self._handle_docker_list(query, page)
+            elif data.startswith("docker_detail|"):
+                container_id = data.split("|")[1]
+                await self._handle_docker_detail(query, container_id)
+            elif data == "noop":
+                pass  # Do nothing for pagination indicator
 
             else:
                 await query.edit_message_text(f"Unknown action: {data}")
@@ -476,8 +489,8 @@ class CallbackHandlers:
             reply_markup=get_docker_menu_keyboard()
         )
 
-    async def _handle_docker_list(self, query) -> None:
-        """Handle Docker list containers callback."""
+    async def _handle_docker_list(self, query, page: int = 0) -> None:
+        """Handle Docker list containers callback with pagination."""
         if not self.docker_manager or not self.docker_manager.is_available():
             await query.edit_message_text(
                 f"{EMOJI['error']} Docker is not available\\.",
@@ -486,9 +499,9 @@ class CallbackHandlers:
             )
             return
 
-        containers = self.docker_manager.list_containers(all_containers=True)
+        containers, total, total_pages = self.docker_manager.get_containers_page(page=page, per_page=10)
 
-        if not containers:
+        if total == 0:
             message = (
                 f"{EMOJI['container']} *CONTAINERS*\n\n"
                 f"No containers found\\."
@@ -503,26 +516,97 @@ class CallbackHandlers:
         counts = self.docker_manager.get_container_count()
         message = (
             f"{EMOJI['container']} *CONTAINERS* "
-            f"\\(🟢 {counts['running']} \\| 🔴 {counts['stopped']}\\)\n\n"
+            f"\\(🟢 {counts['running']} \\| 🔴 {counts['stopped']} \\| 📦 {total}\\)\n\n"
+            f"_Select a container to see details:_"
         )
 
-        for container in containers:
-            status_emoji = self.docker_manager.get_status_emoji(container.status)
-            name = escape_markdown(container.name)
-            image = escape_markdown(container.image[:30])
-            status = escape_markdown(container.status)
-
-            message += f"{status_emoji} *{name}*\n"
-            message += f"    Image: `{image}`\n"
-            message += f"    Status: {status}"
-            
-            if container.ports:
-                ports = escape_markdown(container.ports)
-                message += f" \\| Ports: {ports}"
-            message += "\n\n"
+        keyboard = get_container_list_keyboard(
+            containers=containers,
+            page=page,
+            total_pages=total_pages,
+            get_status_emoji=self.docker_manager.get_status_emoji
+        )
 
         await query.edit_message_text(
             message,
             parse_mode="MarkdownV2",
-            reply_markup=get_docker_back_keyboard()
+            reply_markup=keyboard
+        )
+
+    async def _handle_docker_detail(self, query, container_id: str) -> None:
+        """Handle Docker container detail view."""
+        if not self.docker_manager or not self.docker_manager.is_available():
+            await query.edit_message_text(
+                f"{EMOJI['error']} Docker is not available\\.",
+                parse_mode="MarkdownV2",
+                reply_markup=get_back_to_main_keyboard()
+            )
+            return
+
+        container = self.docker_manager.get_container_by_id(container_id)
+
+        if not container:
+            await query.edit_message_text(
+                f"{EMOJI['error']} Container not found\\.",
+                parse_mode="MarkdownV2",
+                reply_markup=get_docker_back_keyboard()
+            )
+            return
+
+        status_emoji = self.docker_manager.get_status_emoji(container.status)
+        name = escape_markdown(container.name)
+        image = escape_markdown(container.image[:40])
+        status = escape_markdown(container.status)
+
+        message = f"{status_emoji} *{name}*\n\n"
+        message += f"*Status:* {status}\n"
+        message += f"*Image:* `{image}`\n"
+
+        if container.health:
+            health = escape_markdown(container.health)
+            message += f"*Health:* {health}\n"
+
+        if container.ip_address:
+            ip = escape_markdown(container.ip_address)
+            message += f"*IP:* `{ip}`\n"
+
+        if container.ports:
+            ports = escape_markdown(container.ports)
+            message += f"*Ports:* {ports}\n"
+
+        message += "\n"
+
+        # Resource usage (only for running containers)
+        if container.status == 'running':
+            if container.cpu_percent is not None:
+                cpu = escape_markdown(f"{container.cpu_percent:.1f}%")
+                message += f"*CPU:* {cpu}\n"
+
+            if container.memory_mb is not None:
+                if container.memory_limit_mb and container.memory_percent:
+                    mem = escape_markdown(
+                        f"{container.memory_mb:.1f} / {container.memory_limit_mb:.0f} MB ({container.memory_percent:.1f}%)"
+                    )
+                else:
+                    mem = escape_markdown(f"{container.memory_mb:.1f} MB")
+                message += f"*Memory:* {mem}\n"
+
+            message += "\n"
+
+        # Timestamps
+        if container.created:
+            created = escape_markdown(container.created)
+            message += f"*Created:* {created}\n"
+
+        if container.started and container.status == 'running':
+            started = escape_markdown(container.started)
+            message += f"*Started:* {started}\n"
+
+        if container.restart_count > 0:
+            message += f"*Restarts:* {container.restart_count}\n"
+
+        await query.edit_message_text(
+            message,
+            parse_mode="MarkdownV2",
+            reply_markup=get_container_detail_keyboard(container_id)
         )
