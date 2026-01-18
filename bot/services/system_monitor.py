@@ -122,6 +122,7 @@ class SystemMonitor:
         Get disk usage metrics for all physical partitions.
         
         Filters out virtual filesystems like tmpfs, overlay, etc.
+        Deduplicates bind mounts from the same device.
 
         Returns:
             List of DiskMetrics for each physical partition
@@ -140,9 +141,15 @@ class SystemMonitor:
             '/boot/efi', '/snap', '/run', '/dev', '/sys', '/proc'
         }
         
+        # Docker bind mount patterns to exclude (these are files, not real mount points)
+        docker_bind_mounts = {
+            '/etc/hostname', '/etc/hosts', '/etc/resolv.conf'
+        }
+        
         try:
             partitions = psutil.disk_partitions(all=False)
             disks = []
+            seen_devices = set()  # Track devices to avoid duplicates
             
             for partition in partitions:
                 # Skip excluded filesystem types
@@ -161,6 +168,19 @@ class SystemMonitor:
                 # Skip snap mounts
                 if '/snap/' in partition.mountpoint:
                     continue
+                
+                # Skip Docker bind mount files
+                if partition.mountpoint in docker_bind_mounts:
+                    continue
+                
+                # Skip /app paths (container internal mounts)
+                if partition.mountpoint.startswith('/app'):
+                    continue
+                
+                # Skip if we've already seen this device (avoid duplicate bind mounts)
+                if partition.device in seen_devices:
+                    continue
+                seen_devices.add(partition.device)
                 
                 try:
                     usage = psutil.disk_usage(partition.mountpoint)
