@@ -346,3 +346,82 @@ class DockerManager:
         end = start + per_page
         
         return all_containers[start:end], total, total_pages
+
+    def start_container(self, container_id: str) -> tuple[bool, str]:
+        """
+        Start a container.
+        
+        Args:
+            container_id: Container ID (short or full)
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        if not self.is_available():
+            return False, "Docker is not available"
+        
+        try:
+            container = self._client.containers.get(container_id)
+            
+            if container.status == 'running':
+                return False, f"Container '{container.name}' is already running"
+            
+            container.start()
+            logger.info(f"Container {container.name} started successfully")
+            return True, f"Container '{container.name}' started successfully"
+            
+        except Exception as e:
+            logger.error(f"Error starting container {container_id}: {e}")
+            return False, f"Error starting container: {str(e)[:100]}"
+
+    def stop_container(self, container_id: str, timeout: int = 10) -> tuple[bool, str]:
+        """
+        Stop a container.
+        
+        Args:
+            container_id: Container ID (short or full)
+            timeout: Timeout in seconds before killing
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        if not self.is_available():
+            return False, "Docker is not available"
+        
+        try:
+            container = self._client.containers.get(container_id)
+            
+            if container.status != 'running':
+                return False, f"Container '{container.name}' is not running"
+            
+            container.stop(timeout=timeout)
+            logger.info(f"Container {container.name} stopped successfully")
+            return True, f"Container '{container.name}' stopped successfully"
+            
+        except Exception as e:
+            logger.error(f"Error stopping container {container_id}: {e}")
+            return False, f"Error stopping container: {str(e)[:100]}"
+
+    def restart_container(self, container_id: str, timeout: int = 10) -> tuple[bool, str]:
+        """
+        Restart a container.
+        
+        Args:
+            container_id: Container ID (short or full)
+            timeout: Timeout in seconds before killing
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        if not self.is_available():
+            return False, "Docker is not available"
+        
+        try:
+            container = self._client.containers.get(container_id)
+            container.restart(timeout=timeout)
+            logger.info(f"Container {container.name} restarted successfully")
+            return True, f"Container '{container.name}' restarted successfully"
+            
+        except Exception as e:
+            logger.error(f"Error restarting container {container_id}: {e}")
+            return False, f"Error restarting container: {str(e)[:100]}"

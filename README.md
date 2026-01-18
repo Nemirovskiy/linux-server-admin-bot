@@ -22,6 +22,7 @@ Telegram bot for monitoring Ubuntu servers. Monitor system resources and receive
 ### 🐳 Docker Management
 - Paginated container list (10 per page)
 - Container detail view with CPU, memory, IP, ports
+- **Start, Stop, Restart** containers directly from Telegram
 - Container status with health indicators
 - Graceful detection when Docker is not available
 

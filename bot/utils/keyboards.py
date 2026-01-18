@@ -159,24 +159,51 @@ def get_container_list_keyboard(
     return InlineKeyboardMarkup(keyboard)
 
 
-def get_container_detail_keyboard(container_id: str) -> InlineKeyboardMarkup:
-    """Get keyboard for container detail view."""
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['back']} Back to List",
-                callback_data="docker_list|0"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['docker']} Docker Menu",
-                callback_data="cmd_docker"
-            ),
-            InlineKeyboardButton(
-                f"{EMOJI['home']} Main Menu",
-                callback_data="menu_main"
-            )
-        ],
-    ]
+def get_container_detail_keyboard(container_id: str, status: str = "running") -> InlineKeyboardMarkup:
+    """Get keyboard for container detail view with actions."""
+    keyboard = []
+    
+    # Action buttons based on container status
+    action_row = []
+    if status == "running":
+        action_row.append(
+            InlineKeyboardButton("⏹️ Stop", callback_data=f"docker_stop|{container_id}")
+        )
+        action_row.append(
+            InlineKeyboardButton("🔄 Restart", callback_data=f"docker_restart|{container_id}")
+        )
+    else:
+        action_row.append(
+            InlineKeyboardButton("▶️ Start", callback_data=f"docker_start|{container_id}")
+        )
+    
+    if action_row:
+        keyboard.append(action_row)
+    
+    # Refresh button
+    keyboard.append([
+        InlineKeyboardButton(
+            f"{EMOJI['refresh']} Refresh",
+            callback_data=f"docker_detail|{container_id}"
+        )
+    ])
+    
+    # Navigation buttons
+    keyboard.append([
+        InlineKeyboardButton(
+            f"{EMOJI['back']} Back to List",
+            callback_data="docker_list|0"
+        )
+    ])
+    keyboard.append([
+        InlineKeyboardButton(
+            f"{EMOJI['docker']} Docker Menu",
+            callback_data="cmd_docker"
+        ),
+        InlineKeyboardButton(
+            f"{EMOJI['home']} Main Menu",
+            callback_data="menu_main"
+        )
+    ])
+    
     return InlineKeyboardMarkup(keyboard)

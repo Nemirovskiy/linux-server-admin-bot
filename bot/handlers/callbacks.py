@@ -108,6 +108,15 @@ class CallbackHandlers:
             elif data.startswith("docker_detail|"):
                 container_id = data.split("|")[1]
                 await self._handle_docker_detail(query, container_id)
+            elif data.startswith("docker_start|"):
+                container_id = data.split("|")[1]
+                await self._handle_docker_action(query, container_id, "start")
+            elif data.startswith("docker_stop|"):
+                container_id = data.split("|")[1]
+                await self._handle_docker_action(query, container_id, "stop")
+            elif data.startswith("docker_restart|"):
+                container_id = data.split("|")[1]
+                await self._handle_docker_action(query, container_id, "restart")
             elif data == "noop":
                 pass  # Do nothing for pagination indicator
 
@@ -608,5 +617,51 @@ class CallbackHandlers:
         await query.edit_message_text(
             message,
             parse_mode="MarkdownV2",
-            reply_markup=get_container_detail_keyboard(container_id)
+            reply_markup=get_container_detail_keyboard(container_id, container.status)
         )
+
+    async def _handle_docker_action(self, query, container_id: str, action: str) -> None:
+        """Handle Docker container actions (start/stop/restart)."""
+        if not self.docker_manager or not self.docker_manager.is_available():
+            await query.edit_message_text(
+                f"{EMOJI['error']} Docker is not available\\.",
+                parse_mode="MarkdownV2",
+                reply_markup=get_back_to_main_keyboard()
+            )
+            return
+
+        # Show processing message
+        action_emoji = {"start": "▶️", "stop": "⏹️", "restart": "🔄"}
+        action_text = {"start": "Starting", "stop": "Stopping", "restart": "Restarting"}
+        
+        await query.edit_message_text(
+            f"{action_emoji.get(action, '⏳')} {action_text.get(action, 'Processing')} container\\.\\.\\.",
+            parse_mode="MarkdownV2"
+        )
+
+        # Execute action
+        if action == "start":
+            success, message = self.docker_manager.start_container(container_id)
+        elif action == "stop":
+            success, message = self.docker_manager.stop_container(container_id)
+        elif action == "restart":
+            success, message = self.docker_manager.restart_container(container_id)
+        else:
+            success, message = False, "Unknown action"
+
+        if success:
+            result_emoji = EMOJI['success']
+        else:
+            result_emoji = EMOJI['error']
+
+        # Show result briefly, then refresh detail view
+        escaped_message = escape_markdown(message)
+        await query.edit_message_text(
+            f"{result_emoji} {escaped_message}",
+            parse_mode="MarkdownV2"
+        )
+
+        # Wait a moment then show updated container detail
+        import asyncio
+        await asyncio.sleep(1.5)
+        await self._handle_docker_detail(query, container_id)
