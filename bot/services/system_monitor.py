@@ -119,91 +119,27 @@ class SystemMonitor:
 
     def get_all_disk_metrics(self) -> List[DiskMetrics]:
         """
-        Get disk usage metrics for all physical partitions.
-        
-        Filters out virtual filesystems like tmpfs, overlay, etc.
-        Deduplicates bind mounts from the same device.
+        Get disk usage metrics for the host root partition.
 
         Returns:
-            List of DiskMetrics for each physical partition
+            List with the root disk metrics
         """
-        # Filesystem types to exclude (virtual/pseudo filesystems)
-        excluded_fstypes = {
-            'tmpfs', 'devtmpfs', 'devfs', 'overlay', 'squashfs',
-            'iso9660', 'udf', 'proc', 'sysfs', 'cgroup', 'cgroup2',
-            'pstore', 'debugfs', 'securityfs', 'configfs', 'fusectl',
-            'mqueue', 'hugetlbfs', 'autofs', 'binfmt_misc', 'efivarfs',
-            'tracefs', 'nsfs', 'fuse.lxcfs', 'fuse.snapfuse'
-        }
-        
-        # Mount points to exclude
-        excluded_mounts = {
-            '/boot/efi', '/snap', '/run', '/dev', '/sys', '/proc'
-        }
-        
-        # Docker bind mount patterns to exclude (these are files, not real mount points)
-        docker_bind_mounts = {
-            '/etc/hostname', '/etc/hosts', '/etc/resolv.conf'
-        }
-        
         try:
-            partitions = psutil.disk_partitions(all=False)
-            disks = []
-            seen_devices = set()  # Track devices to avoid duplicates
+            # Get root disk usage
+            usage = psutil.disk_usage('/')
             
-            for partition in partitions:
-                # Skip excluded filesystem types
-                if partition.fstype.lower() in excluded_fstypes:
-                    continue
-                
-                # Skip excluded mount points or their subdirectories
-                skip = False
-                for excluded in excluded_mounts:
-                    if partition.mountpoint.startswith(excluded):
-                        skip = True
-                        break
-                if skip:
-                    continue
-                
-                # Skip snap mounts
-                if '/snap/' in partition.mountpoint:
-                    continue
-                
-                # Skip Docker bind mount files
-                if partition.mountpoint in docker_bind_mounts:
-                    continue
-                
-                # Skip /app paths (container internal mounts)
-                if partition.mountpoint.startswith('/app'):
-                    continue
-                
-                # Skip if we've already seen this device (avoid duplicate bind mounts)
-                if partition.device in seen_devices:
-                    continue
-                seen_devices.add(partition.device)
-                
-                try:
-                    usage = psutil.disk_usage(partition.mountpoint)
-                    disks.append(DiskMetrics(
-                        total=usage.total,
-                        used=usage.used,
-                        free=usage.free,
-                        percent=usage.percent,
-                        mount_point=partition.mountpoint,
-                        device=partition.device,
-                        fstype=partition.fstype,
-                    ))
-                except (PermissionError, OSError) as e:
-                    logger.debug(f"Cannot access {partition.mountpoint}: {e}")
-                    continue
-            
-            # Sort: root first, then by mount point
-            disks.sort(key=lambda d: (0 if d.mount_point == '/' else 1, d.mount_point))
-            
-            return disks
+            return [DiskMetrics(
+                total=usage.total,
+                used=usage.used,
+                free=usage.free,
+                percent=usage.percent,
+                mount_point='/',
+                device='',
+                fstype='',
+            )]
             
         except Exception as e:
-            logger.error(f"Error getting all disk metrics: {e}")
+            logger.error(f"Error getting disk metrics: {e}")
             return []
 
     def get_network_metrics(self, interface: Optional[str] = None) -> List[NetworkMetrics]:
