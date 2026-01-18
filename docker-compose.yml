@@ -52,6 +52,11 @@ services:
     # Required for /top command to show host processes instead of container processes
     pid: host
 
+    # Add docker group to access Docker socket
+    # Run 'stat -c '%g' /var/run/docker.sock' on host to get the correct GID
+    group_add:
+      - "111"  # Docker group GID (adjust if different on your system, use: stat -c '%g' /var/run/docker.sock)
+
     # Security options
     security_opt:
       - no-new-privileges:true
