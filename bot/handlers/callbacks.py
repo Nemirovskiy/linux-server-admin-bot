@@ -132,20 +132,8 @@ class CallbackHandlers:
 
     async def _show_main_menu(self, query) -> None:
         """Show the main menu."""
-        tux = (
-            "```\n"
-            "    .--.    \n"
-            "   |o_o |   \n"
-            "   |:_/ |   \n"
-            "  //   \\ \\  \n"
-            " (|     | ) \n"
-            "/'|_   _|'\\ \n"
-            "\\___)=(___/ \n"
-            "```"
-        )
         message = (
             f"{EMOJI['rocket']} *Linux Server Admin Bot*\n\n"
-            f"{tux}\n\n"
             f"Welcome\\! Select an option below:"
         )
         # If coming from a photo message, delete and send new message

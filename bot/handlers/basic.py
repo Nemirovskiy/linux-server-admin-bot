@@ -34,21 +34,8 @@ class BasicHandlers:
         """
         user = update.effective_user
         
-        tux = (
-            "```\n"
-            "    .--.    \n"
-            "   |o_o |   \n"
-            "   |:_/ |   \n"
-            "  //   \\ \\  \n"
-            " (|     | ) \n"
-            "/'|_   _|'\\ \n"
-            "\\___)=(___/ \n"
-            "```"
-        )
-        
         welcome_message = (
             f"{EMOJI['rocket']} *Linux Server Admin Bot*\n\n"
-            f"{tux}\n\n"
             f"Welcome, {escape_markdown(user.first_name)}\\! Select an option below:"
         )
         
