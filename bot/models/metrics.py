@@ -60,6 +60,8 @@ class DiskMetrics:
     free: int  # bytes
     percent: float
     mount_point: str = "/"
+    device: str = ""
+    fstype: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
 
     @property
@@ -76,6 +78,21 @@ class DiskMetrics:
     def free_gb(self) -> float:
         """Free disk space in GB."""
         return self.free / (1024**3)
+    
+    @property
+    def total_tb(self) -> float:
+        """Total disk space in TB."""
+        return self.total / (1024**4)
+    
+    @property
+    def used_tb(self) -> float:
+        """Used disk space in TB."""
+        return self.used / (1024**4)
+    
+    @property
+    def free_tb(self) -> float:
+        """Free disk space in TB."""
+        return self.free / (1024**4)
 
 
 @dataclass

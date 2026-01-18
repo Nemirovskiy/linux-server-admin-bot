@@ -10,6 +10,7 @@ from bot.utils.decorators import (
 )
 from bot.utils.formatters import (
     escape_markdown,
+    format_all_disk_metrics,
     format_bytes,
     format_cpu_metrics,
     format_disk_metrics,
@@ -43,6 +44,7 @@ __all__ = [
     "format_cpu_metrics",
     "format_memory_metrics",
     "format_disk_metrics",
+    "format_all_disk_metrics",
     "format_top_processes",
     # Charts
     "ChartGenerator",

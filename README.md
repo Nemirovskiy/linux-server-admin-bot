@@ -15,7 +15,7 @@ Telegram bot for monitoring Ubuntu servers. Monitor system resources and receive
 ### 📊 System Monitoring
 - **CPU**: Real-time usage, per-core breakdown, frequency, load average
 - **Memory**: RAM and swap usage with detailed breakdown
-- **Disk**: Space usage across mount points
+- **Disk**: Space usage for all physical disks (internal + external HDDs/SSDs)
 - **Network**: Interface statistics, traffic monitoring
 - **Processes**: Top CPU-consuming processes
 

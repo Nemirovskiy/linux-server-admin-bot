@@ -8,6 +8,7 @@ from bot.services import AlertManager, DockerManager, SystemMonitor
 from bot.utils import (
     chart_generator,
     escape_markdown,
+    format_all_disk_metrics,
     format_cpu_metrics,
     format_disk_metrics,
     format_memory_metrics,
@@ -200,8 +201,8 @@ class CallbackHandlers:
 
     async def _handle_disk(self, query) -> None:
         """Handle disk callback."""
-        disks = self.system_monitor.get_disk_metrics()
-        message = format_disk_metrics(disks)
+        disks = self.system_monitor.get_all_disk_metrics()
+        message = format_all_disk_metrics(disks)
         await query.edit_message_text(
             message,
             parse_mode="MarkdownV2",

@@ -117,6 +117,75 @@ class SystemMonitor:
             logger.error(f"Error getting disk metrics for {mount_point}: {e}")
             raise
 
+    def get_all_disk_metrics(self) -> List[DiskMetrics]:
+        """
+        Get disk usage metrics for all physical partitions.
+        
+        Filters out virtual filesystems like tmpfs, overlay, etc.
+
+        Returns:
+            List of DiskMetrics for each physical partition
+        """
+        # Filesystem types to exclude (virtual/pseudo filesystems)
+        excluded_fstypes = {
+            'tmpfs', 'devtmpfs', 'devfs', 'overlay', 'squashfs',
+            'iso9660', 'udf', 'proc', 'sysfs', 'cgroup', 'cgroup2',
+            'pstore', 'debugfs', 'securityfs', 'configfs', 'fusectl',
+            'mqueue', 'hugetlbfs', 'autofs', 'binfmt_misc', 'efivarfs',
+            'tracefs', 'nsfs', 'fuse.lxcfs', 'fuse.snapfuse'
+        }
+        
+        # Mount points to exclude
+        excluded_mounts = {
+            '/boot/efi', '/snap', '/run', '/dev', '/sys', '/proc'
+        }
+        
+        try:
+            partitions = psutil.disk_partitions(all=False)
+            disks = []
+            
+            for partition in partitions:
+                # Skip excluded filesystem types
+                if partition.fstype.lower() in excluded_fstypes:
+                    continue
+                
+                # Skip excluded mount points or their subdirectories
+                skip = False
+                for excluded in excluded_mounts:
+                    if partition.mountpoint.startswith(excluded):
+                        skip = True
+                        break
+                if skip:
+                    continue
+                
+                # Skip snap mounts
+                if '/snap/' in partition.mountpoint:
+                    continue
+                
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    disks.append(DiskMetrics(
+                        total=usage.total,
+                        used=usage.used,
+                        free=usage.free,
+                        percent=usage.percent,
+                        mount_point=partition.mountpoint,
+                        device=partition.device,
+                        fstype=partition.fstype,
+                    ))
+                except (PermissionError, OSError) as e:
+                    logger.debug(f"Cannot access {partition.mountpoint}: {e}")
+                    continue
+            
+            # Sort: root first, then by mount point
+            disks.sort(key=lambda d: (0 if d.mount_point == '/' else 1, d.mount_point))
+            
+            return disks
+            
+        except Exception as e:
+            logger.error(f"Error getting all disk metrics: {e}")
+            return []
+
     def get_network_metrics(self, interface: Optional[str] = None) -> List[NetworkMetrics]:
         """
         Get network interface metrics.

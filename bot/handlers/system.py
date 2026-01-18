@@ -8,6 +8,7 @@ from bot.services import SystemMonitor
 from bot.utils import (
     chart_generator,
     escape_markdown,
+    format_all_disk_metrics,
     format_cpu_metrics,
     format_disk_metrics,
     format_memory_metrics,
@@ -111,28 +112,26 @@ class SystemHandlers:
     @standard_handler
     async def disk_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """
-        Handle /disk command - show detailed disk information with chart.
+        Handle /disk command - show disk information for all mounted disks.
 
         Args:
             update: Telegram update
             context: Bot context
         """
         try:
-            # Get disk metrics
-            metrics = self.monitor.get_disk_metrics()
+            # Get all disk metrics
+            disks = self.monitor.get_all_disk_metrics()
 
-            # Send text message
-            message = format_disk_metrics(metrics)
+            if not disks:
+                await update.message.reply_text(
+                    "💿 No disks found\\.",
+                    parse_mode="MarkdownV2"
+                )
+                return
+
+            # Send text message with all disks
+            message = format_all_disk_metrics(disks)
             await update.message.reply_text(message, parse_mode="MarkdownV2")
-
-            # Generate and send chart
-            chart_buf = chart_generator.generate_disk_chart(
-                total_gb=metrics.total_gb,
-                used_gb=metrics.used_gb,
-                free_gb=metrics.free_gb,
-                percent=metrics.percent,
-            )
-            await update.message.reply_photo(photo=chart_buf, caption=f"{EMOJI['chart']} Disk Usage Chart")
 
         except Exception as e:
             logger.error(f"Error in disk_command: {e}")
