@@ -43,9 +43,9 @@ from typing import Optional
 from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
-from bot.handlers import BasicHandlers, CallbackHandlers, SystemHandlers
+from bot.handlers import BasicHandlers, CallbackHandlers, DockerHandlers, SystemHandlers
 from bot.monitors import HealthMonitor
-from bot.services import AlertManager, SystemMonitor
+from bot.services import AlertManager, DockerManager, SystemMonitor
 from config import get_logger, settings, setup_logging
 
 logger = get_logger(__name__)
@@ -64,7 +64,11 @@ class BotApplication:
         # Handlers
         self.basic_handlers: Optional[BasicHandlers] = None
         self.system_handlers: Optional[SystemHandlers] = None
+        self.docker_handlers: Optional[DockerHandlers] = None
         self.callback_handlers: Optional[CallbackHandlers] = None
+        
+        # Additional services
+        self.docker_manager: Optional[DockerManager] = None
 
     async def initialize(self) -> None:
         """Initialize all services and bot application."""
@@ -82,6 +86,13 @@ class BotApplication:
             disk_threshold=settings.disk_alert_threshold,
             cooldown_seconds=settings.alert_cooldown,
         )
+        
+        # Initialize Docker manager
+        self.docker_manager = DockerManager()
+        if self.docker_manager.is_available():
+            logger.info("Docker is available on this system")
+        else:
+            logger.info("Docker is not available on this system")
 
         # Initialize bot application
         self.app = Application.builder().token(settings.telegram_bot_token).build()
@@ -89,11 +100,13 @@ class BotApplication:
         # Initialize handlers
         self.basic_handlers = BasicHandlers(self.alert_manager)
         self.system_handlers = SystemHandlers(self.system_monitor)
+        self.docker_handlers = DockerHandlers(self.docker_manager)
         
         # Callback handlers for inline keyboard buttons
         self.callback_handlers = CallbackHandlers(
             system_monitor=self.system_monitor,
             alert_manager=self.alert_manager,
+            docker_manager=self.docker_manager,
         )
 
         # Register command handlers
@@ -129,6 +142,9 @@ class BotApplication:
         self.app.add_handler(CommandHandler("temp", self.system_handlers.temp_command))
         self.app.add_handler(CommandHandler("uptime", self.system_handlers.uptime_command))
         self.app.add_handler(CommandHandler("services", self.system_handlers.services_command))
+
+        # Docker commands
+        self.app.add_handler(CommandHandler("docker", self.docker_handlers.docker_command))
 
         # Callback query handler for inline keyboard buttons
         self.app.add_handler(CallbackQueryHandler(self.callback_handlers.handle_callback))
@@ -171,6 +187,7 @@ class BotApplication:
             BotCommand("temp", "🌡️ System temperature"),
             BotCommand("uptime", "🕐 System uptime"),
             BotCommand("services", "🔧 Services status"),
+            BotCommand("docker", "🐳 Docker containers"),
             BotCommand("alerts", "🔔 Alert configuration"),
             BotCommand("author", "👨‍💻 Bot author"),
             BotCommand("help", "❓ Help"),

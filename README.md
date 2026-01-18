@@ -19,7 +19,12 @@ Telegram bot for monitoring Ubuntu servers. Monitor system resources and receive
 - **Network**: Interface statistics, traffic monitoring
 - **Processes**: Top CPU-consuming processes
 
-### 📈 Visualizations
+### � Docker Management
+- List all containers (running and stopped)
+- Container status with health indicators
+- Graceful detection when Docker is not available
+
+### �📈 Visualizations
 - Beautiful matplotlib charts for all metrics
 - CPU usage per core
 - Memory distribution pie charts
@@ -118,6 +123,9 @@ Just type `/start` to see the interactive menu!
 - `/uptime` - System uptime and logged users
 - `/services` - Systemd services status
 
+#### Docker
+- `/docker` - Docker container management menu
+
 #### Alerts
 - `/alerts` - View alert configuration and active alerts
 
@@ -132,10 +140,12 @@ linux-server-admin-bot/
 │   ├── handlers/             # Command handlers
 │   │   ├── basic.py          # Start, help, alerts
 │   │   ├── system.py         # System monitoring commands
+│   │   ├── docker.py         # Docker management commands
 │   │   └── callbacks.py      # Inline keyboard callbacks
 │   ├── services/             # Business logic
 │   │   ├── system_monitor.py # psutil wrapper
-│   │   └── alert_manager.py  # Alert system
+│   │   ├── alert_manager.py  # Alert system
+│   │   └── docker_manager.py # Docker container management
 │   ├── monitors/             # Background tasks
 │   │   └── health_monitor.py # Periodic health checks
 │   ├── models/               # Data models
@@ -188,9 +198,12 @@ The bot requires access to host system resources:
 
 ```yaml
 volumes:
-  - /proc:/host/proc:ro  # System metrics
-  - /sys:/host/sys:ro    # System information
+  - /proc:/host/proc:ro                      # System metrics
+  - /sys:/host/sys:ro                         # System information
+  - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker management (optional)
 ```
+
+> **Note**: The Docker socket mount is optional. If not mounted, the Docker menu will show that Docker is not available.
 
 ## 🎨 Bot Avatar
 
@@ -287,6 +300,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 - [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) - Telegram Bot framework
 - [psutil](https://github.com/giampaolo/psutil) - System monitoring
+- [docker-py](https://github.com/docker/docker-py) - Docker SDK for Python
 - [matplotlib](https://matplotlib.org/) - Visualization library
 
 ## 📧 Support

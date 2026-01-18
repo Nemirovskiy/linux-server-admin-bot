@@ -52,6 +52,8 @@ EMOJI = {
     "temp": "🌡️",
     "services": "🔧",
     "author": "👨‍💻",
+    "docker": "🐳",
+    "container": "📦",
 }
 
 # Command descriptions for bot menu
@@ -68,6 +70,7 @@ COMMANDS = {
     "/temp": "CPU and system temperature",
     "/uptime": "Server uptime",
     "/services": "Systemd services status",
+    "/docker": "Docker containers management",
     "/author": "Bot author information",
 }
 

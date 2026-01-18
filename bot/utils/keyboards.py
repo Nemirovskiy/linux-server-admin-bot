@@ -32,8 +32,49 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"{EMOJI['services']} Services", callback_data="cmd_services"),
         ],
         [
+            InlineKeyboardButton(f"{EMOJI['docker']} Docker", callback_data="cmd_docker"),
+        ],
+        [
             InlineKeyboardButton(f"{EMOJI['alert']} Alerts", callback_data="cmd_alerts"),
             InlineKeyboardButton(f"{EMOJI['help']} Help", callback_data="cmd_help"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_docker_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get the Docker submenu keyboard."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                f"{EMOJI['container']} List Containers",
+                callback_data="docker_list"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"{EMOJI['back']} Back to Menu",
+                callback_data="menu_main"
+            )
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_docker_back_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard to go back to Docker menu."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                f"{EMOJI['back']} Back to Docker",
+                callback_data="cmd_docker"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"{EMOJI['home']} Main Menu",
+                callback_data="menu_main"
+            )
         ],
     ]
     return InlineKeyboardMarkup(keyboard)

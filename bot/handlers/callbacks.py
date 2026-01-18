@@ -4,7 +4,7 @@ Callback query handlers for inline keyboard buttons.
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.services import AlertManager, SystemMonitor
+from bot.services import AlertManager, DockerManager, SystemMonitor
 from bot.utils import (
     chart_generator,
     escape_markdown,
@@ -14,6 +14,8 @@ from bot.utils import (
     format_system_status,
     format_top_processes,
     get_back_to_main_keyboard,
+    get_docker_back_keyboard,
+    get_docker_menu_keyboard,
     get_main_menu_keyboard,
 )
 from config import EMOJI, get_logger, settings
@@ -28,6 +30,7 @@ class CallbackHandlers:
         self,
         system_monitor: SystemMonitor,
         alert_manager: AlertManager,
+        docker_manager: DockerManager = None,
     ) -> None:
         """
         Initialize callback handlers.
@@ -35,9 +38,11 @@ class CallbackHandlers:
         Args:
             system_monitor: System monitor service
             alert_manager: Alert manager service
+            docker_manager: Docker manager service (optional)
         """
         self.system_monitor = system_monitor
         self.alert_manager = alert_manager
+        self.docker_manager = docker_manager
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """
@@ -86,6 +91,12 @@ class CallbackHandlers:
                 await self._handle_alerts(query)
             elif data == "cmd_help":
                 await self._handle_help(query)
+
+            # Docker commands
+            elif data == "cmd_docker":
+                await self._handle_docker(query)
+            elif data == "docker_list":
+                await self._handle_docker_list(query)
 
             else:
                 await query.edit_message_text(f"Unknown action: {data}")
@@ -418,4 +429,100 @@ class CallbackHandlers:
             message,
             parse_mode="MarkdownV2",
             reply_markup=get_back_to_main_keyboard()
+        )
+
+    async def _handle_docker(self, query) -> None:
+        """Handle Docker menu callback."""
+        if not self.docker_manager:
+            await query.edit_message_text(
+                f"{EMOJI['docker']} *DOCKER*\n\n"
+                f"{EMOJI['error']} Docker manager not initialized\\.",
+                parse_mode="MarkdownV2",
+                reply_markup=get_back_to_main_keyboard()
+            )
+            return
+
+        if not self.docker_manager.is_available():
+            error_msg = self.docker_manager.get_error_message() or "Unknown error"
+            message = (
+                f"{EMOJI['docker']} *DOCKER*\n\n"
+                f"{EMOJI['error']} Docker is not available on this server\\.\n\n"
+                f"_Possible reasons:_\n"
+                f"• Docker is not installed\n"
+                f"• Docker daemon is not running\n"
+                f"• No permission to access Docker socket\n\n"
+                f"_Error:_ `{escape_markdown(error_msg[:100])}`"
+            )
+            await query.edit_message_text(
+                message,
+                parse_mode="MarkdownV2",
+                reply_markup=get_back_to_main_keyboard()
+            )
+            return
+
+        counts = self.docker_manager.get_container_count()
+        message = (
+            f"{EMOJI['docker']} *DOCKER*\n\n"
+            f"{EMOJI['success']} Docker is available\n\n"
+            f"*Containers:*\n"
+            f"  🟢 Running: {counts['running']}\n"
+            f"  🔴 Stopped: {counts['stopped']}\n"
+            f"  📦 Total: {counts['total']}\n\n"
+            f"_Select an option below:_"
+        )
+        await query.edit_message_text(
+            message,
+            parse_mode="MarkdownV2",
+            reply_markup=get_docker_menu_keyboard()
+        )
+
+    async def _handle_docker_list(self, query) -> None:
+        """Handle Docker list containers callback."""
+        if not self.docker_manager or not self.docker_manager.is_available():
+            await query.edit_message_text(
+                f"{EMOJI['error']} Docker is not available\\.",
+                parse_mode="MarkdownV2",
+                reply_markup=get_back_to_main_keyboard()
+            )
+            return
+
+        containers = self.docker_manager.list_containers(all_containers=True)
+
+        if not containers:
+            message = (
+                f"{EMOJI['container']} *CONTAINERS*\n\n"
+                f"No containers found\\."
+            )
+            await query.edit_message_text(
+                message,
+                parse_mode="MarkdownV2",
+                reply_markup=get_docker_back_keyboard()
+            )
+            return
+
+        counts = self.docker_manager.get_container_count()
+        message = (
+            f"{EMOJI['container']} *CONTAINERS* "
+            f"\\(🟢 {counts['running']} \\| 🔴 {counts['stopped']}\\)\n\n"
+        )
+
+        for container in containers:
+            status_emoji = self.docker_manager.get_status_emoji(container.status)
+            name = escape_markdown(container.name)
+            image = escape_markdown(container.image[:30])
+            status = escape_markdown(container.status)
+
+            message += f"{status_emoji} *{name}*\n"
+            message += f"    Image: `{image}`\n"
+            message += f"    Status: {status}"
+            
+            if container.ports:
+                ports = escape_markdown(container.ports)
+                message += f" \\| Ports: {ports}"
+            message += "\n\n"
+
+        await query.edit_message_text(
+            message,
+            parse_mode="MarkdownV2",
+            reply_markup=get_docker_back_keyboard()
         )
