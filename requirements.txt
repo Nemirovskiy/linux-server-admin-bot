@@ -6,7 +6,7 @@ python-dotenv==1.0.1
 psutil==5.9.8
 
 # Docker management
-docker==7.0.0
+docker==7.1.0
 
 # Data visualization
 matplotlib==3.8.3
