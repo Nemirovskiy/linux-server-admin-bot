@@ -39,7 +39,7 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       
-      # Docker socket for container management (optional)
+      # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock:ro
       
       # Bot logs (persistent)
