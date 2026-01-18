@@ -34,13 +34,22 @@ class BasicHandlers:
         """
         user = update.effective_user
         
+        tux = (
+            "```\n"
+            "     .--.\n"
+            "    |o_o |\n"
+            "    |:_/ |\n"
+            "   //   \\ \\\n"
+            "  (|     | )\n"
+            " /'\\_   _/`\\\n"
+            " \\___)=(___/\n"
+            "```"
+        )
+        
         welcome_message = (
             f"{EMOJI['rocket']} *Linux Server Admin Bot*\n\n"
-            f"Welcome, {escape_markdown(user.first_name)}\\!\n\n"
-            f"{EMOJI['server']} Monitor your Ubuntu server\n"
-            f"{EMOJI['chart']} View system metrics\n"
-            f"{EMOJI['warning']} Get real\\-time alerts\n\n"
-            f"_Select an option below or use /help_"
+            f"{tux}\n\n"
+            f"Welcome, {escape_markdown(user.first_name)}\\! Select an option below:"
         )
         
         await update.message.reply_text(
