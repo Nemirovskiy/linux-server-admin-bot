@@ -2,6 +2,7 @@
 Callback query handlers for inline keyboard buttons.
 """
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from bot.services import AlertManager, DockerManager, SystemMonitor
@@ -24,6 +25,16 @@ from bot.utils import (
 from config import EMOJI, get_logger, settings
 
 logger = get_logger(__name__)
+
+
+async def _safe_delete_message(message) -> bool:
+    """Safely delete a message, ignoring errors if it can't be deleted."""
+    try:
+        await message.delete()
+        return True
+    except BadRequest as e:
+        logger.debug(f"Could not delete message: {e}")
+        return False
 
 
 class CallbackHandlers:
@@ -139,7 +150,7 @@ class CallbackHandlers:
         )
         # If coming from a photo message, delete and send new message
         if query.message.photo:
-            await query.message.delete()
+            await _safe_delete_message(query.message)
             await query.message.chat.send_message(
                 message,
                 parse_mode="MarkdownV2",
@@ -171,7 +182,7 @@ class CallbackHandlers:
         chart_buf = chart_generator.generate_cpu_chart(cpu.percent, cpu.per_cpu)
         
         # Send new message with photo (can't edit to photo)
-        await query.message.delete()
+        await _safe_delete_message(query.message)
         await context.bot.send_photo(
             chat_id=query.message.chat_id,
             photo=chart_buf,
@@ -190,7 +201,7 @@ class CallbackHandlers:
             memory.total_gb, memory.used_gb, memory.available_gb, memory.percent
         )
         
-        await query.message.delete()
+        await _safe_delete_message(query.message)
         await context.bot.send_photo(
             chat_id=query.message.chat_id,
             photo=chart_buf,
@@ -251,7 +262,7 @@ class CallbackHandlers:
         ]
         chart_buf = chart_generator.generate_process_chart(processes_data)
         
-        await query.message.delete()
+        await _safe_delete_message(query.message)
         await context.bot.send_photo(
             chat_id=query.message.chat_id,
             photo=chart_buf,
