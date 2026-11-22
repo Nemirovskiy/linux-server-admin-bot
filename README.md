@@ -102,7 +102,7 @@ docker-compose logs -f
 
 The bot features a **beautiful interactive menu** with inline keyboard buttons for easy navigation:
 
-- **Main Menu**: Access all features with a single tap
+- **Main Menu**: Open enabled information blocks with one tap
 - **System Monitoring**: CPU, Memory, Disk, Network, Processes
 - **Quick Navigation**: Back buttons and menu shortcuts
 
@@ -139,15 +139,15 @@ Just type `/start` to see the interactive menu!
 ```
 linux-server-admin-bot/
 ├── bot/
-│   ├── handlers/             # Command handlers
-│   │   ├── basic.py          # Start, help, alerts
-│   │   ├── system.py         # System monitoring commands
-│   │   ├── docker.py         # Docker management commands
+│   ├── blocks/               # One automatically discovered module per block
+│   │   ├── base.py           # Shared command, rendering and navigation
+│   │   └── docker.py         # Docker screens, nested menus and actions
+│   ├── handlers/             # Core commands and callback routing
+│   │   ├── basic.py          # Start, status, help and alerts
 │   │   └── callbacks.py      # Inline keyboard callbacks
-│   ├── services/             # Business logic
+│   ├── services/             # Shared services
 │   │   ├── system_monitor.py # psutil wrapper
-│   │   ├── alert_manager.py  # Alert system
-│   │   └── docker_manager.py # Docker container management
+│   │   └── alert_manager.py  # Alert system
 │   ├── monitors/             # Background tasks
 │   │   └── health_monitor.py # Periodic health checks
 │   ├── models/               # Data models
@@ -194,18 +194,86 @@ linux-server-admin-bot/
 | `RATE_LIMIT_PERIOD` | Rate limit period (seconds) | ❌ No | 60 |
 | `LOG_LEVEL` | Logging level | ❌ No | INFO |
 
-### Docker Volumes
+### Information blocks
 
-The bot requires access to host system resources:
+Edit [`blocks.toml`](blocks.toml) over SSH. Its `[blocks]` table applies to everyone
+using the bot. Use `true` or `false` for each block. A disabled block is excluded
+from the menu, status, command list and periodic alert checks. The `/status` and
+`/alerts` commands are always available. Omitted switches use the built-in
+defaults, with Docker disabled and the system blocks enabled.
 
-```yaml
-volumes:
-  - /proc:/host/proc:ro                      # System metrics
-  - /sys:/host/sys:ro                         # System information
-  - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker management (optional)
+Validate the file before applying it. Run the check in the configured bot
+environment (with the Telegram settings from `.env`). The check exits without
+connecting to Telegram or Docker.
+
+```bash
+python main.py --check-blocks
 ```
 
-> **Note**: The Docker socket mount is optional. If not mounted, the Docker menu will show that Docker is not available.
+For a native deployment, restart the bot using its service manager. Set
+`BLOCKS_CONFIG` or pass `--blocks-config /path/to/blocks.toml` to use a
+different file. For Compose, use an image containing the block changes and run:
+
+```bash
+docker compose run --rm --no-deps linux-server-admin-bot python main.py --check-blocks
+docker compose up -d --force-recreate linux-server-admin-bot
+```
+
+Recreating the Compose service picks up changes even when an editor replaces
+the file. Compose also mounts the checkout's `bot/blocks` directory. Keep the
+checkout and image on the same release. To roll back, restore the previous
+configuration and apply it again.
+
+### Docker management
+
+The base Compose service runs without the Docker socket. To enable container
+management, set `docker = true` in `blocks.toml`, set `DOCKER_SOCKET_GID` to the
+socket's group ID if needed, and include the additional Compose file:
+
+```bash
+export DOCKER_SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"
+docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d --force-recreate
+```
+
+To disable management and remove access to the socket, set `docker = false` and
+recreate the service using just the base Compose file.
+
+### Adding a block
+
+Place a Python file in [`bot/blocks/`](bot/blocks/) with one class that inherits
+from `Block`. The bot discovers it when it starts. Use a unique command name
+and add its switch to `blocks.toml`. New blocks are disabled by default unless
+the class opts in with `enabled_by_default = True`. The order of entries in
+the config determines their order in the menu and status.
+
+For example, save this as `bot/blocks/example.py`:
+
+```python
+from bot.blocks import Block
+
+
+class ExampleBlock(Block):
+    name = "example"
+    title = "Example"
+    icon = "📌"
+    description = "Example status"
+
+    def summary(self) -> str:
+        return "Available"
+```
+
+Set `example = true` under `[blocks]`, validate the configuration and restart.
+The base class supplies the Telegram command, main menu button, default detail
+screen and back button. Override `render()` to add details, a chart or a
+keyboard. For nested buttons, declare their callback names in `extra_actions`
+and handle them in `submenu()`. Prefix nested callback names with the block
+name and an underscore, for example `example_details`. The Docker block
+shows this pattern with a container list, pagination and container actions.
+
+For scheduled alerts, set `sends_alerts = True` and implement `check_alert()`.
+Block files are imported during config validation and startup. Keep remote
+connections and other runtime work inside methods. Only install block files
+from sources you trust.
 
 ## 🎨 Bot Avatar
 

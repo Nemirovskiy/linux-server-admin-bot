@@ -10,21 +10,13 @@ from bot.utils.decorators import (
 )
 from bot.utils.formatters import (
     escape_markdown,
-    format_all_disk_metrics,
     format_bytes,
-    format_cpu_metrics,
     format_disk_metrics,
     format_duration,
-    format_memory_metrics,
     format_system_status,
-    format_top_processes,
 )
 from bot.utils.keyboards import (
     get_back_to_main_keyboard,
-    get_container_detail_keyboard,
-    get_container_list_keyboard,
-    get_docker_back_keyboard,
-    get_docker_menu_keyboard,
     get_main_menu_keyboard,
 )
 
@@ -41,19 +33,11 @@ __all__ = [
     "format_bytes",
     "format_duration",
     "format_system_status",
-    "format_cpu_metrics",
-    "format_memory_metrics",
     "format_disk_metrics",
-    "format_all_disk_metrics",
-    "format_top_processes",
     # Charts
     "ChartGenerator",
     "chart_generator",
     # Keyboards
     "get_main_menu_keyboard",
     "get_back_to_main_keyboard",
-    "get_docker_menu_keyboard",
-    "get_docker_back_keyboard",
-    "get_container_list_keyboard",
-    "get_container_detail_keyboard",
 ]

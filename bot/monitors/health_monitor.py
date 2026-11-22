@@ -1,14 +1,14 @@
 """
 Background monitoring and alert scheduler.
 """
-import asyncio
+from collections.abc import Callable, Sequence
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from telegram.ext import Application
 
-from bot.services import AlertManager, SystemMonitor
+from bot.models import Alert
 from bot.utils import escape_markdown
 from config import EMOJI, get_logger, settings
 
@@ -20,25 +20,13 @@ class HealthMonitor:
 
     def __init__(
         self,
-        system_monitor: SystemMonitor,
-        alert_manager: AlertManager,
+        checks: Sequence[Callable[[], Alert | None]],
         bot_app: Application,
     ) -> None:
-        """
-        Initialize health monitor.
-
-        Args:
-            system_monitor: System monitor service
-            alert_manager: Alert manager service
-            bot_app: Telegram bot application
-        """
-        self.system_monitor = system_monitor
-        self.alert_manager = alert_manager
+        self.checks = tuple(checks)
         self.bot_app = bot_app
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._alert_chat_ids: set[int] = set()
-
-        logger.info("HealthMonitor initialized")
 
     def register_alert_chat(self, chat_id: int) -> None:
         """
@@ -62,39 +50,15 @@ class HealthMonitor:
 
     async def check_system_health(self) -> None:
         """Check system health and trigger alerts if needed."""
-        try:
-            logger.debug("Checking system health...")
+        for check in self.checks:
+            try:
+                alert = check()
+                if alert:
+                    await self._send_alert_to_chats(alert)
+            except Exception:
+                logger.exception("Error checking an enabled block for alerts")
 
-            # Get metrics
-            cpu_metrics = self.system_monitor.get_cpu_metrics(interval=0.5)
-            memory_metrics = self.system_monitor.get_memory_metrics()
-            disk_metrics = self.system_monitor.get_disk_metrics()
-
-            # Check for alerts
-            alerts = []
-            
-            cpu_alert = self.alert_manager.check_cpu_alert(cpu_metrics)
-            if cpu_alert:
-                alerts.append(cpu_alert)
-
-            memory_alert = self.alert_manager.check_memory_alert(memory_metrics)
-            if memory_alert:
-                alerts.append(memory_alert)
-
-            disk_alert = self.alert_manager.check_disk_alert(disk_metrics)
-            if disk_alert:
-                alerts.append(disk_alert)
-
-            # Send alerts to registered chats
-            for alert in alerts:
-                await self._send_alert_to_chats(alert)
-
-            logger.debug("System health check completed")
-
-        except Exception as e:
-            logger.error(f"Error checking system health: {e}", exc_info=True)
-
-    async def _send_alert_to_chats(self, alert: any) -> None:
+    async def _send_alert_to_chats(self, alert: Alert) -> None:
         """
         Send alert to all registered chats.
 

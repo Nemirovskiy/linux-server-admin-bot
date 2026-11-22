@@ -1,0 +1,11 @@
+# These switches apply to all Telegram users of this bot.
+[blocks]
+cpu = true
+memory = true
+disk = true
+network = true
+top = true
+temp = true
+uptime = true
+services = true
+docker = false

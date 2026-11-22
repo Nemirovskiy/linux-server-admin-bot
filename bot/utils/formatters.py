@@ -1,14 +1,9 @@
 """
 Text formatting utilities for Telegram messages.
 """
-from datetime import datetime
-from typing import List, Optional
 
 from bot.models import (
-    CPUMetrics,
     DiskMetrics,
-    MemoryMetrics,
-    ProcessInfo,
     SystemStatus,
 )
 from config.constants import EMOJI
@@ -24,6 +19,7 @@ def escape_markdown(text: str) -> str:
     Returns:
         Escaped text
     """
+    text = text.replace("\\", "\\\\")
     special_chars = ["_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"]
     for char in special_chars:
         text = text.replace(char, f"\\{char}")
@@ -107,71 +103,6 @@ def format_system_status(status: SystemStatus) -> str:
     return message
 
 
-def format_cpu_metrics(metrics: CPUMetrics) -> str:
-    """
-    Format CPU metrics for Telegram message.
-
-    Args:
-        metrics: CPU metrics
-
-    Returns:
-        Formatted message in MarkdownV2
-    """
-    status_indicator = _get_status_indicator(metrics.percent)
-    overall_bar = _create_progress_bar(metrics.percent, 100, 12)
-    
-    message = f"🖥️ *CPU INFORMATION*\n\n"
-    message += f"*Overall Usage*\n"
-    message += f"{escape_markdown(overall_bar)} {escape_markdown(f'{metrics.percent:.1f}%')} {status_indicator}\n\n"
-    message += f"*Cores:* {escape_markdown(str(metrics.count))}\n"
-    
-    if metrics.frequency_current:
-        message += f"*Frequency:* {escape_markdown(f'{metrics.frequency_current:.0f} MHz')}\n"
-    
-    if metrics.load_avg:
-        load_str = f"{metrics.load_avg[0]:.2f}, {metrics.load_avg[1]:.2f}, {metrics.load_avg[2]:.2f}"
-        message += f"*Load Average:* {escape_markdown(load_str)}\n"
-    
-    message += "\n*Per\\-Core Usage*\n\n"
-    
-    for i, usage in enumerate(metrics.per_cpu):
-        bar = _create_progress_bar(usage, 100, length=8)
-        indicator = _get_status_indicator(usage)
-        message += f"CPU{i}: {escape_markdown(bar)} {escape_markdown(f'{usage:.1f}%')} {indicator}\n"
-    
-    return message
-
-
-def format_memory_metrics(metrics: MemoryMetrics) -> str:
-    """
-    Format memory metrics for Telegram message.
-
-    Args:
-        metrics: Memory metrics
-
-    Returns:
-        Formatted message in MarkdownV2
-    """
-    status_indicator = _get_status_indicator(metrics.percent)
-    bar = _create_progress_bar(metrics.percent, 100, length=12)
-    
-    message = f"💾 *MEMORY INFORMATION*\n\n"
-    message += f"*Usage*\n"
-    message += f"{escape_markdown(bar)} {escape_markdown(f'{metrics.percent:.1f}%')} {status_indicator}\n\n"
-    message += f"*Total:* {escape_markdown(f'{metrics.total_gb:.2f} GB')}\n"
-    message += f"*Used:* {escape_markdown(f'{metrics.used_gb:.2f} GB')}\n"
-    message += f"*Available:* {escape_markdown(f'{metrics.available_gb:.2f} GB')}\n"
-    
-    if metrics.swap_total > 0:
-        swap_indicator = _get_status_indicator(metrics.swap_percent)
-        swap_bar = _create_progress_bar(metrics.swap_percent, 100, length=12)
-        message += f"\n*Swap*\n"
-        message += f"{escape_markdown(swap_bar)} {escape_markdown(f'{metrics.swap_percent:.1f}%')} {swap_indicator}\n"
-        message += f"└ {escape_markdown(f'{metrics.swap_used / (1024**3):.2f} GB')} / {escape_markdown(f'{metrics.swap_total / (1024**3):.2f} GB')}\n"
-    
-    return message
-
-
 def format_disk_metrics(metrics: DiskMetrics) -> str:
     """
     Format disk metrics for Telegram message.
@@ -185,84 +116,13 @@ def format_disk_metrics(metrics: DiskMetrics) -> str:
     status_indicator = _get_status_indicator(metrics.percent, 75, 90)
     bar = _create_progress_bar(metrics.percent, 100, length=12)
     
-    message = f"💿 *DISK INFORMATION*\n\n"
+    message = "💿 *DISK INFORMATION*\n\n"
     message += f"*Mount Point:* {escape_markdown(metrics.mount_point)}\n\n"
-    message += f"*Usage*\n"
+    message += "*Usage*\n"
     message += f"{escape_markdown(bar)} {escape_markdown(f'{metrics.percent:.1f}%')} {status_indicator}\n\n"
     message += f"*Total:* {escape_markdown(f'{metrics.total_gb:.2f} GB')}\n"
     message += f"*Used:* {escape_markdown(f'{metrics.used_gb:.2f} GB')}\n"
     message += f"*Free:* {escape_markdown(f'{metrics.free_gb:.2f} GB')}\n"
-    
-    return message
-
-
-def _format_disk_size(size_bytes: int) -> str:
-    """Format disk size to appropriate unit (GB or TB)."""
-    gb = size_bytes / (1024**3)
-    if gb >= 1000:
-        return f"{size_bytes / (1024**4):.2f} TB"
-    return f"{gb:.2f} GB"
-
-
-def format_all_disk_metrics(disks: list) -> str:
-    """
-    Format multiple disk metrics for Telegram message.
-
-    Args:
-        disks: List of DiskMetrics
-
-    Returns:
-        Formatted message in MarkdownV2
-    """
-    if not disks:
-        return f"💿 *DISK INFORMATION*\n\nNo disks found\\."
-    
-    message = f"💿 *DISK INFORMATION*\n\n"
-    
-    for disk in disks:
-        status_indicator = _get_status_indicator(disk.percent, 75, 90)
-        bar = _create_progress_bar(disk.percent, 100, length=10)
-        
-        # Format mount point with filesystem type
-        mount = escape_markdown(disk.mount_point)
-        fstype = escape_markdown(disk.fstype) if disk.fstype else ""
-        
-        # Use TB for large disks, GB for smaller
-        total_str = _format_disk_size(disk.total)
-        used_str = _format_disk_size(disk.used)
-        free_str = _format_disk_size(disk.free)
-        
-        message += f"*{mount}*"
-        if fstype:
-            message += f" \\({fstype}\\)"
-        message += f"\n"
-        message += f"{escape_markdown(bar)} {escape_markdown(f'{disk.percent:.1f}%')} {status_indicator}\n"
-        message += f"Used: {escape_markdown(used_str)} / {escape_markdown(total_str)}\n"
-        message += f"Free: {escape_markdown(free_str)}\n\n"
-    
-    return message
-
-
-def format_top_processes(processes: List[ProcessInfo]) -> str:
-    """
-    Format top processes for Telegram message.
-
-    Args:
-        processes: List of process information
-
-    Returns:
-        Formatted message in MarkdownV2
-    """
-    message = f"🔄 *TOP PROCESSES*\n\n"
-    
-    for i, proc in enumerate(processes, 1):
-        cpu_indicator = _get_status_indicator(proc.cpu_percent)
-        message += (
-            f"*{i}\\. {escape_markdown(proc.name[:25])}*\n"
-            f"   {cpu_indicator} CPU: {escape_markdown(f'{proc.cpu_percent:.1f}%')} │ "
-            f"MEM: {escape_markdown(f'{proc.memory_mb:.0f}MB')} │ "
-            f"PID: {escape_markdown(str(proc.pid))}\n"
-        )
     
     return message
 

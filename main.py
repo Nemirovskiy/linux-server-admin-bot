@@ -35,17 +35,21 @@ if os.path.exists(_host_sys):
 # =============================================================================
 # Now safe to import everything else
 # =============================================================================
+import argparse
 import asyncio
 import signal
 import sys
+from pathlib import Path
 from typing import Optional
 
 from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
-from bot.handlers import BasicHandlers, CallbackHandlers, DockerHandlers, SystemHandlers
+from bot.blocks import Block, discover_blocks, select_blocks
+from bot.handlers import BasicHandlers, CallbackHandlers
+from bot.handlers.basic import CORE_COMMANDS
 from bot.monitors import HealthMonitor
-from bot.services import AlertManager, DockerManager, SystemMonitor
+from bot.services import AlertManager, SystemMonitor
 from config import get_logger, settings, setup_logging
 
 logger = get_logger(__name__)
@@ -54,103 +58,55 @@ logger = get_logger(__name__)
 class BotApplication:
     """Main bot application."""
 
-    def __init__(self) -> None:
-        """Initialize bot application."""
+    def __init__(self, config_path: Path) -> None:
+        self.config_path = config_path
         self.app: Optional[Application] = None
-        self.system_monitor: Optional[SystemMonitor] = None
-        self.alert_manager: Optional[AlertManager] = None
+        self.blocks: tuple[Block, ...] = ()
         self.health_monitor: Optional[HealthMonitor] = None
-        
-        # Handlers
-        self.basic_handlers: Optional[BasicHandlers] = None
-        self.system_handlers: Optional[SystemHandlers] = None
-        self.docker_handlers: Optional[DockerHandlers] = None
-        self.callback_handlers: Optional[CallbackHandlers] = None
-        
-        # Additional services
-        self.docker_manager: Optional[DockerManager] = None
 
-    async def initialize(self) -> None:
-        """Initialize all services and bot application."""
-        logger.info("Initializing bot application...")
+    async def initialize(self, check_only: bool = False) -> None:
+        providers = discover_blocks(CORE_COMMANDS)
+        defaults = {name: provider.enabled_by_default for name, provider in providers.items()}
+        try:
+            enabled = select_blocks(self.config_path, defaults)
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"{self.config_path}: {exc}") from exc
 
-        # Initialize services
-        self.system_monitor = SystemMonitor(
+        if check_only:
+            print(f"Enabled blocks: {', '.join(enabled) or 'none'}")
+            return
+
+        monitor = SystemMonitor(
             proc_path=settings.host_proc_path,
             sys_path=settings.host_sys_path,
         )
-
-        self.alert_manager = AlertManager(
+        alerts = AlertManager(
             cpu_threshold=settings.cpu_alert_threshold,
             memory_threshold=settings.memory_alert_threshold,
             disk_threshold=settings.disk_alert_threshold,
             cooldown_seconds=settings.alert_cooldown,
         )
-        
-        # Initialize Docker manager
-        self.docker_manager = DockerManager()
-        if self.docker_manager.is_available():
-            logger.info("Docker is available on this system")
-        else:
-            logger.info("Docker is not available on this system")
-
-        # Initialize bot application
+        self.blocks = tuple(providers[name](monitor, alerts) for name in enabled)
         self.app = Application.builder().token(settings.telegram_bot_token).build()
+        basic = BasicHandlers(alerts, self.blocks)
+        disabled_actions = {
+            action
+            for name, provider in providers.items() if name not in enabled
+            for action in (f"cmd_{name}", *provider.extra_actions)
+        }
+        callbacks = CallbackHandlers(basic, disabled_actions)
 
-        # Initialize handlers
-        self.basic_handlers = BasicHandlers(self.alert_manager)
-        self.system_handlers = SystemHandlers(self.system_monitor)
-        self.docker_handlers = DockerHandlers(self.docker_manager)
-        
-        # Callback handlers for inline keyboard buttons
-        self.callback_handlers = CallbackHandlers(
-            system_monitor=self.system_monitor,
-            alert_manager=self.alert_manager,
-            docker_manager=self.docker_manager,
-        )
+        for command in CORE_COMMANDS:
+            self.app.add_handler(CommandHandler(command, getattr(basic, f"{command}_command")))
+        for block in self.blocks:
+            self.app.add_handler(CommandHandler(block.name, block.command))
+        self.app.add_handler(CallbackQueryHandler(callbacks.handle_callback))
 
-        # Register command handlers
-        self._register_handlers()
+        checks = [block.check_alert for block in self.blocks if block.sends_alerts]
+        if checks:
+            self.health_monitor = HealthMonitor(checks, self.app)
 
-        # Initialize health monitor
-        self.health_monitor = HealthMonitor(
-            system_monitor=self.system_monitor,
-            alert_manager=self.alert_manager,
-            bot_app=self.app,
-        )
-
-        logger.info("Bot application initialized successfully")
-
-    def _register_handlers(self) -> None:
-        """Register all command handlers."""
-        if not self.app:
-            return
-
-        # Basic commands
-        self.app.add_handler(CommandHandler("start", self.basic_handlers.start_command))
-        self.app.add_handler(CommandHandler("help", self.basic_handlers.help_command))
-        self.app.add_handler(CommandHandler("alerts", self.basic_handlers.alerts_command))
-        self.app.add_handler(CommandHandler("author", self.basic_handlers.author_command))
-
-        # System monitoring commands
-        self.app.add_handler(CommandHandler("status", self.system_handlers.status_command))
-        self.app.add_handler(CommandHandler("cpu", self.system_handlers.cpu_command))
-        self.app.add_handler(CommandHandler("memory", self.system_handlers.memory_command))
-        self.app.add_handler(CommandHandler("disk", self.system_handlers.disk_command))
-        self.app.add_handler(CommandHandler("top", self.system_handlers.top_command))
-        self.app.add_handler(CommandHandler("network", self.system_handlers.network_command))
-        self.app.add_handler(CommandHandler("temp", self.system_handlers.temp_command))
-        self.app.add_handler(CommandHandler("uptime", self.system_handlers.uptime_command))
-        self.app.add_handler(CommandHandler("services", self.system_handlers.services_command))
-
-        # Docker commands
-        self.app.add_handler(CommandHandler("docker", self.docker_handlers.docker_command))
-
-        # Callback query handler for inline keyboard buttons
-        self.app.add_handler(CallbackQueryHandler(self.callback_handlers.handle_callback))
-        logger.info("Callback query handler registered")
-
-        logger.info("All command handlers registered")
+        logger.info("Enabled blocks: %s", ", ".join(enabled) or "none")
 
     async def start(self) -> None:
         """Start the bot application."""
@@ -159,40 +115,21 @@ class BotApplication:
 
         logger.info("Starting bot application...")
 
-        # Start health monitor
-        if self.health_monitor:
-            self.health_monitor.start()
-
-        # Start bot
         await self.app.initialize()
         await self.app.start()
-        
-        # Set bot commands menu (appears when user types "/" or clicks menu button)
         await self._set_bot_commands()
-        
         await self.app.updater.start_polling(drop_pending_updates=True)
+
+        if self.health_monitor:
+            self.health_monitor.start()
 
         logger.info("Bot is running! Press Ctrl+C to stop.")
 
     async def _set_bot_commands(self) -> None:
         """Set the bot commands menu visible in Telegram."""
-        commands = [
-            BotCommand("start", "🚀 Main menu"),
-            BotCommand("status", "📊 System status"),
-            BotCommand("cpu", "🖥️ CPU information"),
-            BotCommand("memory", "💾 Memory usage"),
-            BotCommand("disk", "💿 Disk usage"),
-            BotCommand("network", "🌐 Network stats"),
-            BotCommand("top", "📈 Top processes"),
-            BotCommand("temp", "🌡️ System temperature"),
-            BotCommand("uptime", "🕐 System uptime"),
-            BotCommand("services", "🔧 Services status"),
-            BotCommand("docker", "🐳 Docker containers"),
-            BotCommand("alerts", "🔔 Alert configuration"),
-            BotCommand("author", "👨‍💻 Bot author"),
-            BotCommand("help", "❓ Help"),
-        ]
-        
+        commands = [BotCommand(name, description) for name, description in CORE_COMMANDS.items()]
+        commands.extend(BotCommand(block.name, block.description) for block in self.blocks)
+
         await self.app.bot.set_my_commands(commands)
         logger.info("Bot commands menu configured")
 
@@ -237,7 +174,23 @@ class BotApplication:
 
 
 async def main() -> None:
-    """Main entry point."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--blocks-config", type=Path,
+        default=Path(os.environ.get("BLOCKS_CONFIG", Path(__file__).with_name("blocks.toml"))),
+        help="path to the TOML block configuration",
+    )
+    parser.add_argument("--check-blocks", action="store_true", help="validate the block config and exit")
+    args = parser.parse_args()
+    bot_app = BotApplication(args.blocks_config)
+
+    if args.check_blocks:
+        try:
+            await bot_app.initialize(check_only=True)
+        except ValueError as exc:
+            parser.exit(1, f"{exc}\n")
+        return
+
     # Setup logging
     setup_logging()
 
@@ -248,9 +201,6 @@ async def main() -> None:
     logger.info("Linux Server Admin Bot starting...")
     logger.info(f"Allowed users: {settings.allowed_user_ids}")
     logger.info("=" * 60)
-
-    # Create and run bot application
-    bot_app = BotApplication()
 
     try:
         await bot_app.run()

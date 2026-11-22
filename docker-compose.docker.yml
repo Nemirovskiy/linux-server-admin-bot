@@ -1,0 +1,6 @@
+services:
+  linux-server-admin-bot:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_SOCKET_GID:-111}"

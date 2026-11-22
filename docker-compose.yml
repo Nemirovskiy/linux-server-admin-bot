@@ -39,8 +39,9 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       
-      # Docker socket for container management (rw needed for start/stop/restart)
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared block configuration and block modules from this checkout
+      - ./blocks.toml:/app/blocks.toml:ro
+      - ./bot/blocks:/app/bot/blocks:ro
       
       # Bot logs (persistent)
       - ./logs:/app/logs
@@ -51,11 +52,6 @@ services:
     # Share host PID namespace to see host processes
     # Required for /top command to show host processes instead of container processes
     pid: host
-
-    # Add docker group to access Docker socket
-    # Run 'stat -c '%g' /var/run/docker.sock' on host to get the correct GID
-    group_add:
-      - "111"  # Docker group GID (adjust if different on your system, use: stat -c '%g' /var/run/docker.sock)
 
     # Security options
     security_opt:
