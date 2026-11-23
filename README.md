@@ -53,7 +53,26 @@ Telegram bot for monitoring Ubuntu servers. Monitor system resources and receive
 - Telegram Bot Token ([create one](https://t.me/botfather))
 - Your Telegram User ID ([get it](https://t.me/userinfobot))
 
-### Installation
+### Native installation with systemd
+
+From the checkout, run:
+
+```bash
+./setup-native.sh
+```
+
+Run it as the user who will run the bot. It requires Python 3.11+, virtual
+environment support and a user systemd session. On first run the script creates
+`.env`. Set your Telegram token and user ID there, then rerun the installer.
+It installs dependencies, checks the local block configuration and starts
+the user service. If switching an existing bot from Compose, stop its
+container before starting the native service.
+
+Use `journalctl --user -u linux-server-admin-bot -f` to follow logs.
+To start at boot before login, enable lingering with
+`sudo loginctl enable-linger "$(id -un)"`.
+
+### Docker installation
 
 1. **Clone the repository**
 ```bash
