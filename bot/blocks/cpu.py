@@ -3,7 +3,7 @@
 from bot.blocks.base import Block, BlockView
 from bot.models import Alert, CPUMetrics
 from bot.utils import chart_generator, escape_markdown
-from bot.utils.formatters import _create_progress_bar, _get_status_indicator
+from bot.utils.formatters import _create_progress_bar, _get_status_indicator, format_usage_line
 from config import EMOJI
 
 
@@ -24,6 +24,14 @@ class CpuBlock(Block):
 
     def summary(self) -> str:
         return f"{self.monitor.get_cpu_metrics(interval=0.5).percent:.1f}%"
+
+    def status_section(self) -> str:
+        metrics = self.monitor.get_cpu_metrics(interval=0.5)
+        return (
+            f"{self.icon} *{self.title}*\n"
+            f"{format_usage_line(metrics.percent)}\n"
+            f"└ Cores: {escape_markdown(str(metrics.count))}"
+        )
 
     def render(self) -> BlockView:
         metrics = self.monitor.get_cpu_metrics()

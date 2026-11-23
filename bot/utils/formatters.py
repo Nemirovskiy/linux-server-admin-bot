@@ -78,29 +78,30 @@ def format_system_status(status: SystemStatus) -> str:
     Returns:
         Formatted message in MarkdownV2
     """
-    cpu_indicator = _get_status_indicator(status.cpu.percent)
-    mem_indicator = _get_status_indicator(status.memory.percent)
-    disk_indicator = _get_status_indicator(status.disk.percent, 75, 90)
-    
-    cpu_bar = _create_progress_bar(status.cpu.percent, 100, 10)
-    mem_bar = _create_progress_bar(status.memory.percent, 100, 10)
-    disk_bar = _create_progress_bar(status.disk.percent, 100, 10)
-    
     message = (
         f"📊 *SYSTEM STATUS*\n\n"
         f"{EMOJI['cpu']} *CPU*\n"
-        f"{escape_markdown(cpu_bar)} {escape_markdown(f'{status.cpu.percent:.1f}%')} {cpu_indicator}\n"
+        f"{format_usage_line(status.cpu.percent)}\n"
         f"└ Cores: {escape_markdown(str(status.cpu.count))}\n\n"
         f"{EMOJI['memory']} *Memory*\n"
-        f"{escape_markdown(mem_bar)} {escape_markdown(f'{status.memory.percent:.1f}%')} {mem_indicator}\n"
+        f"{format_usage_line(status.memory.percent)}\n"
         f"└ {escape_markdown(f'{status.memory.used_gb:.1f}GB')} / {escape_markdown(f'{status.memory.total_gb:.1f}GB')}\n\n"
         f"{EMOJI['disk']} *Disk*\n"
-        f"{escape_markdown(disk_bar)} {escape_markdown(f'{status.disk.percent:.1f}%')} {disk_indicator}\n"
+        f"{format_usage_line(status.disk.percent, 75, 90)}\n"
         f"└ {escape_markdown(f'{status.disk.used_gb:.1f}GB')} / {escape_markdown(f'{status.disk.total_gb:.1f}GB')}\n\n"
         f"{EMOJI['clock']} *Uptime:* {escape_markdown(status.uptime_formatted)}\n"
     )
     
     return message
+
+
+def format_usage_line(
+    percent: float, warning_threshold: int = 60, critical_threshold: int = 80
+) -> str:
+    """Format a compact MarkdownV2 progress bar, percentage, and status indicator."""
+    bar = _create_progress_bar(percent, 100)
+    indicator = _get_status_indicator(percent, warning_threshold, critical_threshold)
+    return f"{escape_markdown(f'{bar} {percent:.1f}%')} {indicator}"
 
 
 def format_disk_metrics(metrics: DiskMetrics) -> str:

@@ -353,7 +353,9 @@ class ExampleBlock(Block):
 
 Set `example = true` under `[blocks]`, validate the configuration and restart.
 The base class supplies the Telegram command, main menu button, default detail
-screen and back button. Override `render()` to add details, a chart or a
+screen and back button. The overall status uses `summary()` by default.
+Override `status_section()` to supply a compact MarkdownV2 section for
+`/status`. Override `render()` to add details, a chart or a
 keyboard. For nested buttons, declare their callback names in `extra_actions`
 and handle them in `submenu()`. Prefix nested callback names with the block
 name and an underscore, for example `example_details`. The Docker block

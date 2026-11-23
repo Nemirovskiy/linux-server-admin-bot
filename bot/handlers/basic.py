@@ -45,16 +45,16 @@ class BasicHandlers:
         )
 
     async def status_text(self) -> str:
-        lines = [f"{EMOJI['chart']} *System Status*"]
-        summaries = await asyncio.gather(
-            *(asyncio.to_thread(block.summary) for block in self.blocks),
+        lines = [f"{EMOJI['chart']} *SYSTEM STATUS*"]
+        sections = await asyncio.gather(
+            *(asyncio.to_thread(block.status_section) for block in self.blocks),
             return_exceptions=True,
         )
-        for block, summary in zip(self.blocks, summaries, strict=True):
-            if isinstance(summary, BaseException):
-                logger.warning("Could not read block %s: %s", block.name, summary)
-                summary = "Unavailable"
-            lines.append(f"{block.icon} *{escape_markdown(block.title)}:* {escape_markdown(summary)}")
+        for block, section in zip(self.blocks, sections, strict=True):
+            if isinstance(section, BaseException):
+                logger.warning("Could not read block %s: %s", block.name, section)
+                section = f"{block.icon} *{escape_markdown(block.title)}:* Unavailable"
+            lines.append(section)
         if not self.blocks:
             lines.append("No information blocks enabled\\.")
         return "\n\n".join(lines)

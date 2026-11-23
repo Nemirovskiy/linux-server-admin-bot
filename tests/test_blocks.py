@@ -4,6 +4,7 @@ import pytest
 from telegram.ext import CallbackQueryHandler, CommandHandler
 
 from bot.blocks import select_blocks
+from bot.models import CPUMetrics, DiskMetrics, MemoryMetrics
 from config import settings
 from main import BotApplication
 
@@ -83,7 +84,12 @@ async def test_status_uses_shared_format_and_isolates_an_unavailable_block(tmp_p
     path.write_text("[blocks]\ncpu = true\nmemory = true\n")
     monkeypatch.setattr("bot.services.SystemMonitor.get_cpu_metrics", Mock(side_effect=OSError))
     monkeypatch.setattr(
-        "bot.services.SystemMonitor.get_memory_metrics", Mock(return_value=Mock(percent=42.5))
+        "bot.services.SystemMonitor.get_memory_metrics",
+        Mock(
+            return_value=MemoryMetrics(
+                total=4 * 1024**3, used=2 * 1024**3, available=2 * 1024**3, percent=42.5
+            )
+        ),
     )
     app = BotApplication(path)
     await app.initialize()
@@ -96,8 +102,64 @@ async def test_status_uses_shared_format_and_isolates_an_unavailable_block(tmp_p
 
     status = await basic.status_text()
     assert "*CPU:* Unavailable" in status
-    assert r"*Memory:* 42\.5%" in status
+    assert "💾 *Memory*\n" + r"\[████░░░░░░\] 42\.5% 🟢" in status
     assert "Docker" not in status
+
+
+async def test_status_command_and_button_show_compact_block_sections(tmp_path, monkeypatch):
+    path = tmp_path / "blocks.toml"
+    path.write_text("[blocks]\ncpu = true\nmemory = true\ndisk = true\nuptime = true\nnetwork = true\n")
+    gib = 1024**3
+    metrics = {
+        "get_cpu_metrics": CPUMetrics(percent=83.7, count=2, per_cpu=[80.0, 87.4]),
+        "get_memory_metrics": MemoryMetrics(total=4 * gib, used=gib, available=3 * gib, percent=25.0),
+        "get_disk_metrics": DiskMetrics(total=10 * gib, used=8 * gib, free=2 * gib, percent=80.0),
+        "get_uptime_info": {"uptime_seconds": 6 * 86400 + 3 * 3600 + 44 * 60},
+    }
+    for method, value in metrics.items():
+        monkeypatch.setattr(f"bot.services.SystemMonitor.{method}", Mock(return_value=value))
+    monkeypatch.setattr(
+        "bot.blocks.network.NetworkBlock.summary", lambda self: "1 interface (eth_0)"
+    )
+    app = BotApplication(path)
+    await app.initialize()
+    handlers = app.app.handlers[0]
+    command = next(
+        handler.callback
+        for handler in handlers
+        if isinstance(handler, CommandHandler) and "status" in handler.commands
+    )
+    callback = next(
+        handler.callback for handler in handlers if isinstance(handler, CallbackQueryHandler)
+    )
+    query = Mock(data="cmd_status", answer=AsyncMock(), edit_message_text=AsyncMock())
+    update = Mock(
+        callback_query=query,
+        message=Mock(reply_text=AsyncMock()),
+        effective_user=Mock(id=settings.allowed_user_ids[0]),
+        effective_chat=None,
+    )
+
+    await command(update, Mock())
+    await callback(update, Mock())
+
+    expected = (
+        "📊 *SYSTEM STATUS*\n\n"
+        "🖥️ *CPU*\n"
+        r"\[████████░░\] 83\.7% 🔴" "\n"
+        "└ Cores: 2\n\n"
+        "💾 *Memory*\n"
+        r"\[██░░░░░░░░\] 25\.0% 🟢" "\n"
+        r"└ 1\.0GB / 4\.0GB" "\n\n"
+        "💿 *Disk*\n"
+        r"\[████████░░\] 80\.0% 🟡" "\n"
+        r"└ 8\.0GB / 10\.0GB" "\n\n"
+        "🕐 *Uptime:* 6d 3h 44m\n\n"
+        r"🌐 *Network:* 1 interface \(eth\_0\)"
+    )
+    update.message.reply_text.assert_awaited_once_with(expected, parse_mode="MarkdownV2")
+    assert query.edit_message_text.await_args.args == (expected,)
+    assert query.edit_message_text.await_args.kwargs["parse_mode"] == "MarkdownV2"
 
 
 async def test_docker_can_be_enabled_independently(tmp_path, monkeypatch):

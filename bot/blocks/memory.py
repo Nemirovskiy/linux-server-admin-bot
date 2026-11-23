@@ -3,7 +3,7 @@
 from bot.blocks.base import Block, BlockView
 from bot.models import Alert, MemoryMetrics
 from bot.utils import chart_generator, escape_markdown
-from bot.utils.formatters import _create_progress_bar, _get_status_indicator
+from bot.utils.formatters import _create_progress_bar, _get_status_indicator, format_usage_line
 from config import EMOJI
 
 
@@ -24,6 +24,11 @@ class MemoryBlock(Block):
 
     def summary(self) -> str:
         return f"{self.monitor.get_memory_metrics().percent:.1f}%"
+
+    def status_section(self) -> str:
+        metrics = self.monitor.get_memory_metrics()
+        size = escape_markdown(f"{metrics.used_gb:.1f}GB / {metrics.total_gb:.1f}GB")
+        return f"{self.icon} *{self.title}*\n{format_usage_line(metrics.percent)}\n└ {size}"
 
     def render(self) -> BlockView:
         metrics = self.monitor.get_memory_metrics()

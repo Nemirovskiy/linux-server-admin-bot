@@ -3,7 +3,7 @@
 from bot.blocks.base import Block, BlockView
 from bot.models import Alert, DiskMetrics
 from bot.utils import escape_markdown
-from bot.utils.formatters import _create_progress_bar, _get_status_indicator
+from bot.utils.formatters import _create_progress_bar, _get_status_indicator, format_usage_line
 from config import EMOJI
 
 
@@ -24,6 +24,11 @@ class DiskBlock(Block):
 
     def summary(self) -> str:
         return f"{self.monitor.get_disk_metrics().percent:.1f}%"
+
+    def status_section(self) -> str:
+        metrics = self.monitor.get_disk_metrics()
+        size = escape_markdown(f"{metrics.used_gb:.1f}GB / {metrics.total_gb:.1f}GB")
+        return f"{self.icon} *{self.title}*\n{format_usage_line(metrics.percent, 75, 90)}\n└ {size}"
 
     def render(self) -> BlockView:
         return self.view(format_all_disk_metrics(self.monitor.get_all_disk_metrics()))

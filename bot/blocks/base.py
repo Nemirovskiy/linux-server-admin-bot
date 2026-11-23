@@ -54,7 +54,11 @@ class Block(ABC):
 
     @abstractmethod
     def summary(self) -> str:
-        """Return a short, plain-text status summary."""
+        """Return a short, plain-text summary."""
+
+    def status_section(self) -> str:
+        """Return this block's MarkdownV2 section for the overall status."""
+        return f"{self.icon} *{escape_markdown(self.title)}:* {escape_markdown(self.summary())}"
 
     def render(self) -> BlockView:
         return self.view(escape_markdown(self.summary()))
