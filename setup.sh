@@ -69,6 +69,14 @@ echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo ""
+    mkdir -p data/config || exit 1
+    if [[ -f blocks.toml && ! -e data/config/blocks.toml ]]; then
+        cp blocks.toml data/config/blocks.toml || exit 1
+    fi
+    if [[ "$(id -u)" != 1000 ]]; then
+        sudo chown -R 1000:1000 data/config || exit 1
+    fi
+
     echo "Building Docker image..."
     docker-compose build
     

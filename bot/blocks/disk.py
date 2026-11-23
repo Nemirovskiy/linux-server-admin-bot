@@ -12,7 +12,6 @@ class DiskBlock(Block):
     title = "Disk"
     icon = EMOJI["disk"]
     description = "Disk usage"
-    enabled_by_default = True
 
     sends_alerts = True
 

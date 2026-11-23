@@ -64,3 +64,7 @@ charts/
 
 # Docker
 docker-compose.override.yml
+
+# Local block configuration
+blocks.toml
+.blocks-config.lock

@@ -35,7 +35,7 @@ COPY --from=builder /install /usr/local
 COPY bot/ ./bot/
 COPY config/ ./config/
 COPY main.py .
-COPY blocks.toml .
+COPY blocks.toml.example .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 botuser && \

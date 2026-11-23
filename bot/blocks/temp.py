@@ -10,7 +10,6 @@ class TempBlock(Block):
     title = "Temperature"
     icon = EMOJI["temp"]
     description = "System temperature"
-    enabled_by_default = True
 
     def summary(self) -> str:
         temperatures = self.monitor.get_temperature() or {}

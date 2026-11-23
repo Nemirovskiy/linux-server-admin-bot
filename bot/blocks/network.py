@@ -10,7 +10,6 @@ class NetworkBlock(Block):
     title = "Network"
     icon = EMOJI["network"]
     description = "Network statistics"
-    enabled_by_default = True
 
     def summary(self) -> str:
         networks = [net for net in self.monitor.get_network_metrics() if net.interface != "lo"]

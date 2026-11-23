@@ -12,7 +12,6 @@ class MemoryBlock(Block):
     title = "Memory"
     icon = EMOJI["memory"]
     description = "Memory usage"
-    enabled_by_default = True
 
     sends_alerts = True
 

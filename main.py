@@ -66,15 +66,10 @@ class BotApplication:
 
     async def initialize(self, check_only: bool = False) -> None:
         providers = discover_blocks(CORE_COMMANDS)
-        defaults = {name: provider.enabled_by_default for name, provider in providers.items()}
         try:
-            enabled = select_blocks(self.config_path, defaults)
+            enabled = select_blocks(self.config_path, providers, Path(__file__).with_name("blocks.toml.example"))
         except (OSError, ValueError) as exc:
             raise ValueError(f"{self.config_path}: {exc}") from exc
-
-        if check_only:
-            print(f"Enabled blocks: {', '.join(enabled) or 'none'}")
-            return
 
         monitor = SystemMonitor(
             proc_path=settings.host_proc_path,
@@ -87,6 +82,17 @@ class BotApplication:
             cooldown_seconds=settings.alert_cooldown,
         )
         self.blocks = tuple(providers[name](monitor, alerts) for name in enabled)
+        if check_only:
+            print(f"Enabled blocks: {', '.join(enabled) or 'none'}")
+            issues = []
+            for block in self.blocks:
+                issue = block.dependency_issue()
+                if issue:
+                    issues.append(f"{block.name}: {issue}")
+            if issues:
+                raise ValueError("\n".join(issues))
+            return
+
         self.app = Application.builder().token(settings.telegram_bot_token).build()
         basic = BasicHandlers(alerts, self.blocks)
         disabled_actions = {
@@ -102,7 +108,7 @@ class BotApplication:
             self.app.add_handler(CommandHandler(block.name, block.command))
         self.app.add_handler(CallbackQueryHandler(callbacks.handle_callback))
 
-        checks = [block.check_alert for block in self.blocks if block.sends_alerts]
+        checks = [block.poll_alert for block in self.blocks if block.sends_alerts]
         if checks:
             self.health_monitor = HealthMonitor(checks, self.app)
 

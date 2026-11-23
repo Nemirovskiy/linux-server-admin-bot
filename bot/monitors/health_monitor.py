@@ -1,6 +1,7 @@
 """
 Background monitoring and alert scheduler.
 """
+import asyncio
 from collections.abc import Callable, Sequence
 from typing import Optional
 
@@ -10,7 +11,7 @@ from telegram.ext import Application
 
 from bot.models import Alert
 from bot.utils import escape_markdown
-from config import EMOJI, get_logger, settings
+from config import AlertType, EMOJI, get_logger, settings
 
 logger = get_logger(__name__)
 
@@ -52,7 +53,7 @@ class HealthMonitor:
         """Check system health and trigger alerts if needed."""
         for check in self.checks:
             try:
-                alert = check()
+                alert = await asyncio.to_thread(check)
                 if alert:
                     await self._send_alert_to_chats(alert)
             except Exception:
@@ -78,13 +79,17 @@ class HealthMonitor:
         
         emoji = severity_emoji.get(alert.severity, EMOJI["warning"])
         
-        message = (
-            f"{emoji} *ALERT: {escape_markdown(alert.title)}*\n\n"
-            f"{escape_markdown(alert.message)}\n\n"
-            f"Threshold: {escape_markdown(f'{alert.threshold:.1f}%')}\n"
-            f"Current: {escape_markdown(f'{alert.metric_value:.1f}%')}\n"
-            f"Severity: {escape_markdown(alert.severity.upper())}"
-        )
+        lines = [
+            f"{emoji} *ALERT: {escape_markdown(alert.title)}*",
+            "",
+            escape_markdown(alert.message),
+            "",
+        ]
+        if alert.alert_type in {AlertType.CPU, AlertType.MEMORY, AlertType.DISK}:
+            lines.append(f"Threshold: {escape_markdown(f'{alert.threshold:.1f}%')}")
+            lines.append(f"Current: {escape_markdown(f'{alert.metric_value:.1f}%')}")
+        lines.append(f"Severity: {escape_markdown(alert.severity.upper())}")
+        message = "\n".join(lines)
 
         # Send to all registered chats
         for chat_id in self._alert_chat_ids:

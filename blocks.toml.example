@@ -9,3 +9,4 @@ temp = true
 uptime = true
 services = true
 docker = false
+crowdsec = false

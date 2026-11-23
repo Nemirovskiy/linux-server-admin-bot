@@ -13,7 +13,7 @@ class TopBlock(Block):
     title = "Processes"
     icon = EMOJI["process"]
     description = "Top processes"
-    enabled_by_default = True
+    combine_photo = True
 
     def summary(self) -> str:
         processes = self.monitor.get_top_processes(limit=1)
@@ -51,8 +51,8 @@ def format_top_processes(processes: list[ProcessInfo]) -> str:
     for i, proc in enumerate(processes, 1):
         cpu_indicator = _get_status_indicator(proc.cpu_percent)
         message += (
-            f"*{i}\\. {escape_markdown(proc.name[:25])}*\n"
-            f"   {cpu_indicator} CPU: {escape_markdown(f'{proc.cpu_percent:.1f}%')} │ "
+            f"*{i}\\. {escape_markdown(proc.name[:20])}* · "
+            f"{cpu_indicator} CPU: {escape_markdown(f'{proc.cpu_percent:.1f}%')} │ "
             f"MEM: {escape_markdown(f'{proc.memory_mb:.0f}MB')} │ "
             f"PID: {escape_markdown(str(proc.pid))}\n"
         )

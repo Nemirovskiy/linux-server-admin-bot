@@ -23,7 +23,7 @@ def test_invalid_block_switches(tmp_path):
 
 async def test_switches_control_commands_menu_status_and_alerts(tmp_path, monkeypatch):
     path = tmp_path / "blocks.toml"
-    path.write_text("[blocks]\ncpu = false\nmemory = false\ndocker = false\n")
+    path.write_text("[blocks]\ncpu = false\nmemory = false\ndisk = true\ndocker = false\n")
     monkeypatch.setattr("bot.blocks.docker.DockerManager", Mock(side_effect=AssertionError))
     app = BotApplication(path)
     await app.initialize()
@@ -80,8 +80,7 @@ async def test_status_and_alerts_work_with_all_blocks_disabled(tmp_path):
 
 async def test_status_uses_shared_format_and_isolates_an_unavailable_block(tmp_path, monkeypatch):
     path = tmp_path / "blocks.toml"
-    names = ("disk", "network", "top", "temp", "uptime", "services", "docker")
-    path.write_text("[blocks]\n" + "".join(f"{name} = false\n" for name in names))
+    path.write_text("[blocks]\ncpu = true\nmemory = true\n")
     monkeypatch.setattr("bot.services.SystemMonitor.get_cpu_metrics", Mock(side_effect=OSError))
     monkeypatch.setattr(
         "bot.services.SystemMonitor.get_memory_metrics", Mock(return_value=Mock(percent=42.5))
@@ -184,3 +183,32 @@ class ExampleBlock(Block):
     update = Mock(callback_query=query, effective_user=Mock(id=settings.allowed_user_ids[0]))
     await callback(update, Mock())
     assert query.edit_message_text.await_args.args[0] == "📌 *Example*\n\nDetails more"
+
+
+def test_working_config_is_seeded_and_updated_without_replacing_values(tmp_path):
+    template = tmp_path / "blocks.toml.example"
+    template.write_text("[blocks]\ncpu = true\n")
+    path = tmp_path / "config" / "blocks.toml"
+    assert select_blocks(path, ("cpu", "disk"), template) == ("cpu",)
+    assert path.read_text() == "[blocks]\ncpu = true\ndisk = false\n"
+
+    original = "[blocks]\n# Only disk on this server\ndisk = true\ncpu = false"
+    path.write_text(original)
+    assert select_blocks(path, ("cpu", "disk", "crowdsec"), template) == ("disk",)
+    assert path.read_text() == original + "\ncrowdsec = false\n"
+
+    path.write_text("[blocks]\ncpu = invalid\n")
+    with pytest.raises(ValueError):
+        select_blocks(path, ("cpu", "disk", "crowdsec"), template)
+    assert path.read_text() == "[blocks]\ncpu = invalid\n"
+
+
+async def test_config_check_reports_missing_dependencies(tmp_path, monkeypatch):
+    path = tmp_path / "blocks.toml"
+    path.write_text("[blocks]\ncrowdsec = true\n")
+    monkeypatch.setattr(
+        "bot.blocks.crowdsec.CrowdSecBlock.dependency_issue",
+        lambda self: "Install cscli",
+    )
+    with pytest.raises(ValueError, match="crowdsec: Install cscli"):
+        await BotApplication(path).initialize(check_only=True)

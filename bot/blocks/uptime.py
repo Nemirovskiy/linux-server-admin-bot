@@ -10,7 +10,6 @@ class UptimeBlock(Block):
     title = "Uptime"
     icon = EMOJI["clock"]
     description = "System uptime"
-    enabled_by_default = True
 
     def summary(self) -> str:
         return format_duration(self.monitor.get_uptime_info()["uptime_seconds"])

@@ -79,8 +79,8 @@ DISK_ALERT_THRESHOLD=90
 
 3. **Create logs directory with correct permissions**
 ```bash
-mkdir -p logs
-sudo chown -R 1000:1000 logs
+mkdir -p logs data/config
+sudo chown -R 1000:1000 logs data/config
 sudo chmod -R 775 logs
 ```
 
@@ -196,33 +196,41 @@ linux-server-admin-bot/
 
 ### Information blocks
 
-Edit [`blocks.toml`](blocks.toml) over SSH. Its `[blocks]` table applies to everyone
-using the bot. Use `true` or `false` for each block. A disabled block is excluded
-from the menu, status, command list and periodic alert checks. The `/status` and
-`/alerts` commands are always available. Omitted switches use the built-in
-defaults, with Docker disabled and the system blocks enabled.
+The bot reads a local, Git-ignored `blocks.toml`. On first startup it copies
+the tracked `blocks.toml.example`. On later starts it appends newly discovered
+blocks with `false`, preserving existing values, comments and ordering.
+Edit the local `[blocks]` table over SSH and restart to apply your changes.
+Before pulling the release that removes the tracked file, save a copy of
+your existing `blocks.toml` outside the checkout, then restore it to the
+native or Compose location below.
 
-Validate the file before applying it. Run the check in the configured bot
-environment (with the Telegram settings from `.env`). The check exits without
-connecting to Telegram or Docker.
+**Native.** The local file defaults to `blocks.toml` beside `main.py`. An existing
+file at that location is kept. To use another location, set `BLOCKS_CONFIG` or
+pass `--blocks-config /path/to/blocks.toml` both for validation and startup.
 
 ```bash
 python main.py --check-blocks
 ```
 
-For a native deployment, restart the bot using its service manager. Set
-`BLOCKS_CONFIG` or pass `--blocks-config /path/to/blocks.toml` to use a
-different file. For Compose, use an image containing the block changes and run:
+**Docker Compose.** The local file is `./data/config/blocks.toml` on the host.
+Prepare the directory before starting the container. If upgrading from the
+previous root-level file, copy it before the first startup:
 
 ```bash
+mkdir -p data/config
+if [ -f blocks.toml ] && [ ! -e data/config/blocks.toml ]; then
+  cp blocks.toml data/config/blocks.toml
+fi
+sudo chown -R 1000:1000 data/config
 docker compose run --rm --no-deps linux-server-admin-bot python main.py --check-blocks
 docker compose up -d --force-recreate linux-server-admin-bot
 ```
 
-Recreating the Compose service picks up changes even when an editor replaces
-the file. Compose also mounts the checkout's `bot/blocks` directory. Keep the
-checkout and image on the same release. To roll back, restore the previous
-configuration and apply it again.
+The host directory persists across container and image replacement. Use the same
+Compose files for validation and startup when enabling Docker management.
+When validation reports a missing service or a permission problem, the check
+returns a nonzero exit code. During ordinary startup the bot can still serve
+other blocks, and the affected block shows its diagnostic.
 
 ### Docker management
 
@@ -238,12 +246,31 @@ docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d --force-
 To disable management and remove access to the socket, set `docker = false` and
 recreate the service using just the base Compose file.
 
+### CrowdSec
+
+Set `crowdsec = true` in the local `blocks.toml`, validate and restart. Open CrowdSec
+from `/start` or use `/crowdsec` for the main screen. The details button is
+shown when alerts exist in the last 24 hours. The IP total counts distinct
+addresses with a ban decision in those alerts, including expired decisions.
+LAPI availability and registered bouncers are shown separately from the totals.
+
+CrowdSec parses its configured log sources. The bot reads the resulting alerts
+and checks for new detections on the normal `ALERT_CHECK_INTERVAL`. It groups
+new detections into one notification per check and starts counting from the
+bot startup time. Historical alerts remain visible in the summary.
+
+Run `cscli alerts list --since 24h --limit 0 -o json` as the account that runs
+the bot to verify access. The bot calls `cscli` directly without an interactive
+sudo prompt. Set `CROWDSEC_CSCLI` in the process environment to use a different
+executable. In a container, that executable and the required CrowdSec
+configuration and data access must be available inside the container.
+
 ### Adding a block
 
 Place a Python file in [`bot/blocks/`](bot/blocks/) with one class that inherits
 from `Block`. The bot discovers it when it starts. Use a unique command name
-and add its switch to `blocks.toml`. New blocks are disabled by default unless
-the class opts in with `enabled_by_default = True`. The order of entries in
+and add its switch to `blocks.toml`. New blocks are disabled until
+explicitly enabled in the local file. The order of entries in
 the config determines their order in the menu and status.
 
 For example, save this as `bot/blocks/example.py`:

@@ -10,7 +10,6 @@ class ServicesBlock(Block):
     title = "Services"
     icon = EMOJI["services"]
     description = "System services"
-    enabled_by_default = True
 
     def summary(self) -> str:
         services = self.monitor.get_services_status()

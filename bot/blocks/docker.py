@@ -43,9 +43,18 @@ class DockerBlock(Block):
         super().__init__(monitor, alerts)
         self.docker_manager = DockerManager()
 
+    def dependency_issue(self) -> str | None:
+        if self.docker_manager.is_available():
+            return None
+        error = self.docker_manager.get_error_message()
+        if error == "Docker SDK not installed":
+            return "Install the Docker SDK from requirements.txt."
+        return "Start Docker and grant the bot access to the Docker socket."
+
     def summary(self) -> str:
-        if not self.docker_manager.is_available():
-            return "Unavailable"
+        issue = self.dependency_issue()
+        if issue:
+            return issue
         counts = self.docker_manager.get_container_count()
         return f"{counts['running']} running / {counts['total']} total"
 
@@ -272,7 +281,7 @@ class DockerManager:
         Returns:
             True if Docker is available and accessible
         """
-        if self._available is not None:
+        if self._available:
             return self._available
 
         if not DOCKER_SDK_AVAILABLE:
@@ -282,7 +291,7 @@ class DockerManager:
             return False
 
         try:
-            self._client = docker.from_env()
+            self._client = docker.from_env(timeout=5)
             # Test connection by pinging
             self._client.ping()
             self._available = True

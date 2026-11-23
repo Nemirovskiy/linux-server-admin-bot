@@ -43,13 +43,14 @@ class Block(ABC):
     title: str
     icon: str
     description: str
-    enabled_by_default = False
     extra_actions: tuple[str, ...] = ()
     sends_alerts = False
+    combine_photo = False
 
     def __init__(self, monitor: "SystemMonitor", alerts: "AlertManager") -> None:
         self.monitor = monitor
         self.alerts = alerts
+        self._last_dependency_issue: str | None = None
 
     @abstractmethod
     def summary(self) -> str:
@@ -81,10 +82,32 @@ class Block(ABC):
     def check_alert(self) -> Alert | None:
         return None
 
+    def dependency_issue(self) -> str | None:
+        """Return an actionable error for a missing external dependency."""
+        return None
+
+    def poll_alert(self) -> Alert | None:
+        issue = self.dependency_issue()
+        if issue != self._last_dependency_issue:
+            if issue:
+                logger.warning("%s: %s", self.name, issue)
+            else:
+                logger.info("%s: dependency available again", self.name)
+            self._last_dependency_issue = issue
+        if issue is not None:
+            return None
+        return self.check_alert()
+
     @standard_handler
     async def command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         view = await asyncio.to_thread(self.render)
         message = update.effective_message
+        if self.combine_photo and self.has_caption(view):
+            await message.reply_photo(
+                photo=view.photo, caption=view.text, parse_mode="MarkdownV2",
+                reply_markup=view.keyboard,
+            )
+            return
         await message.reply_text(view.text, parse_mode="MarkdownV2", reply_markup=view.keyboard)
         if view.photo is not None:
             await message.reply_photo(photo=view.photo, caption=view.chart_caption)
@@ -99,8 +122,12 @@ class Block(ABC):
     async def submenu(self, query: CallbackQuery, action: str, value: str) -> None:
         raise ValueError(f"Unknown block action: {action}")
 
+    @staticmethod
+    def has_caption(view: BlockView) -> bool:
+        return view.photo is not None and len(view.text) <= MessageLimit.CAPTION_LENGTH
+
     async def show_view(self, query: CallbackQuery, view: BlockView) -> None:
-        if view.photo is not None and len(view.text) <= MessageLimit.CAPTION_LENGTH:
+        if self.has_caption(view):
             await query.message.reply_photo(
                 photo=view.photo,
                 caption=view.text,

@@ -1,12 +1,15 @@
 """Discover block files and validate the selected blocks at startup."""
 
+import fcntl
 import importlib
 import inspect
+import os
 import pkgutil
 import re
 import tomllib
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from bot.blocks.base import Block, BlockView
 
@@ -61,20 +64,69 @@ def discover_blocks(reserved_commands: Iterable[str]) -> dict[str, type[Block]]:
     return blocks
 
 
-def select_blocks(path: Path, defaults: Mapping[str, bool]) -> tuple[str, ...]:
-    with path.open("rb") as stream:
-        document = tomllib.load(stream)
+def _switches(text: str, known: Iterable[str]) -> dict[str, bool]:
+    document = tomllib.loads(text)
 
     if set(document) != {"blocks"} or not isinstance(document["blocks"], dict):
         raise ValueError("Expected a single [blocks] table")
 
     switches = document["blocks"]
-    unknown = switches.keys() - defaults.keys()
+    unknown = switches.keys() - known
     if unknown:
         raise ValueError(f"Unknown blocks: {', '.join(sorted(unknown))}")
     for name, enabled in switches.items():
         if not isinstance(enabled, bool):
             raise ValueError(f"Block '{name}' must be true or false")
 
-    order = dict.fromkeys((*switches, *defaults))
-    return tuple(name for name in order if switches.get(name, defaults[name]))
+    return switches
+
+
+def select_blocks(
+    path: Path, providers: Iterable[str], template: Path | None = None
+) -> tuple[str, ...]:
+    """Create or update a local file and return only its explicitly enabled blocks."""
+    known = tuple(providers)
+    path = path.resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with (path.parent / ".blocks-config.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with path.open("r", encoding="utf-8", newline="") as stream:
+                original = stream.read()
+                mode = os.fstat(stream.fileno()).st_mode & 0o777
+        except FileNotFoundError:
+            original = None
+            mode = 0o600
+
+        text = (
+            original
+            if original is not None
+            else (template.read_text(encoding="utf-8") if template is not None else "[blocks]\n")
+        )
+        switches = _switches(text, known)
+        missing = [name for name in known if name not in switches]
+        if missing:
+            newline = "\r\n" if "\r\n" in text else "\n"
+            prefix = "" if re.search(r"^\s*\[blocks\]", text, re.MULTILINE) else "blocks."
+            suffix = "" if text.endswith("\n") else newline
+            text += suffix + "".join(f"{prefix}{name} = false{newline}" for name in missing)
+            switches = _switches(text, known)
+
+        if text != original:
+            with NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="", dir=path.parent, delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                try:
+                    os.fchmod(stream.fileno(), mode)
+                    stream.write(text)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    current = path.read_bytes().decode("utf-8") if path.exists() else None
+                    if current != original:
+                        raise ValueError("Blocks configuration changed during the update. Retry.")
+                    os.replace(temporary, path)
+                finally:
+                    temporary.unlink(missing_ok=True)
+
+    return tuple(name for name, enabled in switches.items() if enabled)

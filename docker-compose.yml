@@ -32,6 +32,7 @@ services:
       - RATE_LIMIT_CALLS=${RATE_LIMIT_CALLS:-10}
       - RATE_LIMIT_PERIOD=${RATE_LIMIT_PERIOD:-60}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - BLOCKS_CONFIG=/app/data/config/blocks.toml
     
     # Volumes for monitoring host system
     volumes:
@@ -40,7 +41,11 @@ services:
       - /sys:/host/sys:ro
       
       # Shared block configuration and block modules from this checkout
-      - ./blocks.toml:/app/blocks.toml:ro
+      - type: bind
+        source: ./data/config
+        target: /app/data/config
+        bind:
+          create_host_path: false
       - ./bot/blocks:/app/bot/blocks:ro
       
       # Bot logs (persistent)

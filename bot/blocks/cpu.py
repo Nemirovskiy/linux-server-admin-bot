@@ -12,7 +12,6 @@ class CpuBlock(Block):
     title = "CPU"
     icon = EMOJI["cpu"]
     description = "CPU information"
-    enabled_by_default = True
 
     sends_alerts = True
 
