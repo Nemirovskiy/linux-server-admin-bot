@@ -144,8 +144,11 @@ Just type `/start` to see the interactive menu!
 - `/uptime` - System uptime and logged users
 - `/services` - Systemd services status
 
-#### Docker
+#### Optional blocks
 - `/docker` - Docker container management menu
+- `/crowdsec` - CrowdSec protection status and 24-hour summary
+
+See [Information blocks](#information-blocks) to enable or disable these commands.
 
 #### Alerts
 - `/alerts` - View alert configuration and active alerts
@@ -218,7 +221,33 @@ linux-server-admin-bot/
 The bot reads a local, Git-ignored `blocks.toml`. On first startup it copies
 the tracked `blocks.toml.example`. On later starts it appends newly discovered
 blocks with `false`, preserving existing values, comments and ordering.
-Edit the local `[blocks]` table over SSH and restart to apply your changes.
+Edit the local `[blocks]` table over SSH. Set a block to `true` to enable it or
+`false` to disable it. For example, change the existing lines in your file:
+
+```toml
+[blocks]
+network = false
+docker = false
+crowdsec = true
+```
+
+| Switch | Telegram command | Fresh install |
+|--------|------------------|---------------|
+| `cpu` | `/cpu` | On |
+| `memory` | `/memory` | On |
+| `disk` | `/disk` | On |
+| `network` | `/network` | On |
+| `top` | `/top` | On |
+| `temp` | `/temp` | On |
+| `uptime` | `/uptime` | On |
+| `services` | `/services` | On |
+| `docker` | `/docker` | Off |
+| `crowdsec` | `/crowdsec` | Off |
+
+The selection applies to everyone using the bot. When you disable a block,
+its button, command, status summary and scheduled checks are removed.
+`/start`, `/status` and `/alerts` are always available.
+
 Before pulling the release that removes the tracked file, save a copy of
 your existing `blocks.toml` outside the checkout, then restore it to the
 native or Compose location below.
@@ -227,8 +256,12 @@ native or Compose location below.
 file at that location is kept. To use another location, set `BLOCKS_CONFIG` or
 pass `--blocks-config /path/to/blocks.toml` both for validation and startup.
 
+For an installation created with `setup-native.sh`, check the edited file
+and restart the user service:
+
 ```bash
-python main.py --check-blocks
+.venv/bin/python main.py --check-blocks &&
+  systemctl --user restart linux-server-admin-bot.service
 ```
 
 **Docker Compose.** The local file is `./data/config/blocks.toml` on the host.
@@ -241,8 +274,14 @@ if [ -f blocks.toml ] && [ ! -e data/config/blocks.toml ]; then
   cp blocks.toml data/config/blocks.toml
 fi
 sudo chown -R 1000:1000 data/config
-docker compose run --rm --no-deps linux-server-admin-bot python main.py --check-blocks
-docker compose up -d --force-recreate linux-server-admin-bot
+```
+
+After editing `data/config/blocks.toml`, check the configuration and recreate
+the service:
+
+```bash
+docker compose run --rm --no-deps linux-server-admin-bot python main.py --check-blocks &&
+  docker compose up -d --force-recreate linux-server-admin-bot
 ```
 
 The host directory persists across container and image replacement. Use the same
@@ -267,9 +306,12 @@ recreate the service using just the base Compose file.
 
 ### CrowdSec
 
-Set `crowdsec = true` in the local `blocks.toml`, validate and restart. Open CrowdSec
-from `/start` or use `/crowdsec` for the main screen. The details button is
-shown when alerts exist in the last 24 hours. The IP total counts distinct
+Set `crowdsec = true` in the local `blocks.toml`, then follow the validation
+and restart commands for your installation above. Open CrowdSec from `/start`
+or use `/crowdsec` for the main screen. The **Подробнее** button appears when
+alerts exist in the last 24 hours. It shows scenario counts and recent alerts.
+To disable the block and stop its Telegram notifications, set `crowdsec = false`
+and apply the change the same way. The IP total counts distinct
 addresses with a ban decision in those alerts, including expired decisions.
 LAPI availability and registered bouncers are shown separately from the totals.
 
@@ -281,8 +323,9 @@ bot startup time. Historical alerts remain visible in the summary.
 Run `cscli alerts list --since 24h --limit 0 -o json` as the account that runs
 the bot to verify access. The bot calls `cscli` directly without an interactive
 sudo prompt. Set `CROWDSEC_CSCLI` in the process environment to use a different
-executable. In a container, that executable and the required CrowdSec
-configuration and data access must be available inside the container.
+executable. For Docker Compose, provide `cscli` and access to the relevant
+CrowdSec configuration inside the bot container. The standard bot image
+ships without `cscli`.
 
 ### Adding a block
 
