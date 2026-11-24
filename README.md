@@ -303,42 +303,14 @@ recreate the service using just the base Compose file.
 
 ### Adding a block
 
-Place a Python file in [`bot/blocks/`](bot/blocks/) with one class that inherits
-from `Block`. The bot discovers it when it starts. Use a unique command name
-and add its switch to `blocks.toml`. New blocks are disabled until
-explicitly enabled in the local file. The order of entries in
-the config determines their order in the menu and status.
+Use [Plugin API v1](docs/plugin-api.md) to define a block in
+[`bot/blocks/`](bot/blocks/). The bot discovers block files at startup and
+enables only the blocks selected in `blocks.toml`. The order of entries
+in the config determines their order in the menu and status.
 
-For example, save this as `bot/blocks/example.py`:
-
-```python
-from bot.blocks import Block
-
-
-class ExampleBlock(Block):
-    name = "example"
-    title = "Example"
-    icon = "📌"
-    description = "Example status"
-
-    def summary(self) -> str:
-        return "Available"
-```
-
-Set `example = true` under `[blocks]`, validate the configuration and restart.
-The base class supplies the Telegram command, main menu button, default detail
-screen and back button. The overall status uses `summary()` by default.
-Override `status_section()` to supply a compact MarkdownV2 section for
-`/status`. Override `render()` to add details, a chart or a
-keyboard. For nested buttons, declare their callback names in `extra_actions`
-and handle them in `submenu()`. Prefix nested callback names with the block
-name and an underscore, for example `example_details`. The Docker block
-shows this pattern with a container list, pagination and container actions.
-
-For scheduled alerts, set `sends_alerts = True` and implement `check_alert()`.
-Block files are imported during config validation and startup. Keep remote
-connections and other runtime work inside methods. Only install block files
-from sources you trust.
+See the [block architecture](docs/architecture.md) for startup, routing
+and alert delivery. Block files are imported during startup and config
+validation. Keep runtime work inside block methods.
 
 ## 🎨 Bot Avatar
 
