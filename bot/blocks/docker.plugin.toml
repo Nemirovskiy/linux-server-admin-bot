@@ -8,3 +8,4 @@ api_version = "1.0"
 entry_point = "bot.blocks.docker:DockerBlock"
 default_enabled = false
 extra_actions = ["docker_list", "docker_page", "docker_detail", "docker_start", "docker_stop", "docker_restart"]
+permissions = ["docker.containers.read", "docker.containers.inspect", "docker.containers.stats", "docker.containers.start", "docker.containers.stop", "docker.containers.restart"]

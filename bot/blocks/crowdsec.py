@@ -1,9 +1,6 @@
-"""Read CrowdSec detections and decisions through cscli."""
+"""Show CrowdSec detections received from the broker."""
 
 import asyncio
-import json
-import os
-import subprocess
 from collections import Counter
 from datetime import UTC, datetime
 
@@ -21,58 +18,25 @@ class CrowdSecBlock(Block):
         version="1.0.0",
         icon="🛡️",
         sends_alerts=True,
-        permissions=("crowdsec.alerts.read", "crowdsec.decisions.read"),
+        permissions=(
+            "crowdsec.status.read",
+            "crowdsec.alerts.read",
+            "crowdsec.decisions.read",
+            "crowdsec.bouncers.read",
+        ),
     )
     extra_actions = ("crowdsec_details",)
 
     def __init__(self, context: PluginContext) -> None:
         super().__init__(context)
-        self._use_sudo = os.environ.get("CROWDSEC_USE_SUDO") == "1"
-        self._binary = os.environ.get("CROWDSEC_CSCLI", "cscli")
         self._started_at = datetime.now(UTC).replace(microsecond=0)
         self._last_id = 0
 
-    def _run(self, *args: str) -> str:
-        command = [self._binary, *args]
-        if self._use_sudo:
-            command = ["sudo", "-n", "--", *command]
-        try:
-            result = subprocess.run(
-                args=command,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                stdin=subprocess.DEVNULL,
-            )
-        except FileNotFoundError as exc:
-            if self._use_sudo:
-                raise RuntimeError("CROWDSEC_USE_SUDO=1, но sudo не найден") from exc
-            raise RuntimeError("Установите CrowdSec с cscli или укажите CROWDSEC_CSCLI") from exc
-        except (OSError, subprocess.SubprocessError) as exc:
-            if self._use_sudo:
-                raise RuntimeError(
-                    "cscli через sudo -n не выполнен. Проверьте путь к cscli, "
-                    "правило NOPASSWD и доступность CrowdSec"
-                ) from exc
-            raise RuntimeError(
-                "команда cscli не выполнена. Проверьте доступ и настройки CrowdSec"
-            ) from exc
-        return result.stdout
-
-    def _list(self, *args: str) -> list[dict]:
-        try:
-            records = json.loads(self._run(*args, "-o", "json"))
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("cscli вернул некорректный JSON") from exc
-        if records is None:
-            return []
-        if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
-            raise RuntimeError("неизвестный формат ответа cscli")
-        return records
-
     def _events(self) -> list[dict]:
-        return self._list("alerts", "list", "--since", "24h", "--limit", "0")
+        result = self.execute_privileged_sync("crowdsec.alerts.read", period="24h")
+        if not result.success:
+            raise RuntimeError(result.message)
+        return result.data
 
     @staticmethod
     def _scenarios(events: list[dict]) -> Counter:
@@ -90,24 +54,20 @@ class CrowdSecBlock(Block):
         }
 
     def dependency_issue(self) -> str | None:
-        try:
-            self._run("lapi", "status")
-        except RuntimeError as exc:
-            return str(exc)
-        return None
+        result = self.execute_privileged_sync("crowdsec.status.read")
+        return None if result.success else result.message
 
     def _protection_status(self) -> str:
-        try:
-            self._run("lapi", "status")
-        except RuntimeError as exc:
-            return f"LAPI недоступен ({exc})"
-        try:
-            bouncers = self._list("bouncers", "list")
-        except RuntimeError:
+        issue = self.dependency_issue()
+        if issue:
+            return f"LAPI недоступен ({issue})"
+        result = self.execute_privileged_sync("crowdsec.bouncers.read")
+        if not result.success:
             return "LAPI доступен · статус компонентов блокировки неизвестен"
-        if not bouncers:
+        count = result.data["count"]
+        if not count:
             return "LAPI доступен · компоненты блокировки не зарегистрированы"
-        return f"LAPI доступен · зарегистрировано компонентов блокировки: {len(bouncers)}"
+        return f"LAPI доступен · зарегистрировано компонентов блокировки: {count}"
 
     def summary(self) -> str:
         try:

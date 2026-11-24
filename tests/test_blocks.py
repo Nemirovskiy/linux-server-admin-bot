@@ -5,6 +5,7 @@ import pytest
 from telegram.error import TimedOut
 from telegram.ext import CallbackQueryHandler, CommandHandler
 
+from bot.api import BrokerResult
 from bot.blocks import BlockView
 from bot.models import CPUMetrics, DiskMetrics, MemoryMetrics
 from bot.plugins.config import PluginConfig
@@ -36,7 +37,7 @@ def test_invalid_block_switches(tmp_path):
 async def test_switches_control_commands_menu_status_and_alerts(tmp_path, monkeypatch):
     path = tmp_path / "blocks.toml"
     path.write_text("[blocks]\ncpu = false\nmemory = false\ndisk = true\ndocker = false\n")
-    monkeypatch.setattr("bot.blocks.docker.DockerManager", Mock(side_effect=AssertionError))
+    monkeypatch.setattr("bot.blocks.docker.DockerBlock.__init__", Mock(side_effect=AssertionError))
     app = await initialize_app(path)
 
     handlers = app.app.handlers[0]
@@ -198,13 +199,11 @@ async def test_status_back_opens_menu_if_acknowledgement_times_out(tmp_path):
 async def test_docker_can_be_enabled_independently(tmp_path, monkeypatch):
     path = tmp_path / "blocks.toml"
     path.write_text("[blocks]\ndocker = true\n")
-    manager = Mock()
-    factory = Mock(return_value=manager)
-    monkeypatch.setattr("bot.blocks.docker.DockerManager", factory)
+    operation = Mock(return_value=BrokerResult(True, "OK", data=[]))
+    monkeypatch.setattr("bot.blocks.docker.DockerBlock.execute_privileged_sync", operation)
     app = await initialize_app(path)
 
-    factory.assert_called_once()
-    manager.is_available.assert_called_once()
+    operation.assert_called_once_with("docker.containers.read")
     handlers = app.app.handlers[0]
     assert any(
         "docker" in handler.commands for handler in handlers if isinstance(handler, CommandHandler)
@@ -218,10 +217,8 @@ async def test_docker_can_be_enabled_independently(tmp_path, monkeypatch):
 async def test_docker_page_routes_through_the_registered_submenu(tmp_path, monkeypatch):
     path = tmp_path / "blocks.toml"
     path.write_text("[blocks]\ndocker = true\n")
-    manager = Mock()
-    manager.is_available.return_value = True
-    manager.get_containers_page.return_value = ([], 0, 0)
-    monkeypatch.setattr("bot.blocks.docker.DockerManager", Mock(return_value=manager))
+    operation = Mock(return_value=BrokerResult(True, "OK", data=[]))
+    monkeypatch.setattr("bot.blocks.docker.DockerBlock.execute_privileged_sync", operation)
     app = await initialize_app(path)
     callback = next(
         handler.callback for handler in app.app.handlers[0] if isinstance(handler, CallbackQueryHandler)
@@ -233,7 +230,8 @@ async def test_docker_page_routes_through_the_registered_submenu(tmp_path, monke
 
     await callback(update, Mock())
 
-    manager.get_containers_page.assert_called_once_with(page=2, per_page=10)
+    assert operation.call_count == 2
+    operation.assert_called_with("docker.containers.read")
     assert "No containers found" in query.edit_message_text.await_args.args[0]
 
 

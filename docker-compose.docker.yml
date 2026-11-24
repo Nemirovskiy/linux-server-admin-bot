@@ -1,6 +1,4 @@
+# Compatibility with older Compose commands. Docker administration requires
+# the native broker, so this override keeps the standard unprivileged service.
 services:
-  linux-server-admin-bot:
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    group_add:
-      - "${DOCKER_SOCKET_GID:-111}"
+  linux-server-admin-bot: {}

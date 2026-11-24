@@ -109,3 +109,32 @@ def test_tui_select_save_and_cancel():
     assert configure(screen, plugins) == {"disk": True}
     screen.key.side_effect = [" ", "q"]
     assert configure(screen, plugins) is None
+
+
+def test_offline_broker_version_and_permission_declarations(tmp_path, capsys):
+    config = tmp_path / "nonexistent.toml"
+    assert main(["--json", "broker", "version"]) == 0
+    assert json.loads(capsys.readouterr().out)["protocol_version"] == 1
+    assert main(["--config", str(config), "--json", "permissions", "requested", "crowdsec"]) == 0
+    result, = json.loads(capsys.readouterr().out)
+    assert "crowdsec.status.read" in result["requested"]
+    assert "crowdsec.alerts.read" in result["requested"]
+    assert not config.exists()
+
+
+def test_cli_missing_grants_are_distinguished_from_unavailable_broker(tmp_path, capsys, monkeypatch):
+    from bot.api.broker import BrokerResult
+
+    config = tmp_path / "nonexistent.toml"
+    command = ["--config", str(config), "--json", "permissions", "missing", "docker"]
+    monkeypatch.setattr("cli.broker._request", lambda _: BrokerResult(
+        True, "OK", data={"docker": {"enabled": True, "allow": ["docker.containers.read"]}}
+    ))
+    assert main(command) == 0
+    result, = json.loads(capsys.readouterr().out)
+    assert "docker.containers.read" not in result["missing"]
+    assert "docker.containers.restart" in result["missing"]
+
+    monkeypatch.setattr("cli.broker._request", lambda _: BrokerResult(False, "Unavailable", "BROKER_UNAVAILABLE"))
+    assert main(command) == 1
+    assert json.loads(capsys.readouterr().out)["code"] == "BROKER_UNAVAILABLE"

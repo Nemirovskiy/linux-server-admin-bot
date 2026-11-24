@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from logging import getLogger
 from unittest.mock import Mock
 
-from bot.api import NullBroker, PluginContext
+from bot.api import BrokerResult, NullBroker, PluginContext
 from bot.blocks.crowdsec import CrowdSecBlock
 
 
@@ -51,42 +51,28 @@ def test_polling_reports_new_detections_once_and_skips_old_and_manual_events():
     alerts.create_custom_alert.assert_called_once()
 
 
-def test_cscli_sudo_requires_explicit_opt_in(monkeypatch):
-    run = Mock(return_value=Mock(stdout="[]"))
-    monkeypatch.setattr("bot.blocks.crowdsec.subprocess.run", run)
-    monkeypatch.setenv("CROWDSEC_CSCLI", "/usr/bin/cscli")
-    monkeypatch.delenv("CROWDSEC_USE_SUDO", raising=False)
-    assert make_block()._events() == []
-    expected = [
-        "/usr/bin/cscli",
-        "alerts",
-        "list",
-        "--since",
-        "24h",
-        "--limit",
-        "0",
-        "-o",
-        "json",
-    ]
-    assert run.call_args.kwargs["args"] == expected
-
-    monkeypatch.setenv("CROWDSEC_USE_SUDO", "1")
-    assert make_block()._events() == []
-    assert run.call_args.kwargs["args"] == ["sudo", "-n", "--", *expected]
-
-
-def test_cscli_runs_through_sudo_with_a_single_argument_list(tmp_path, monkeypatch):
-    sudo = tmp_path / "sudo"
-    sudo.write_text('#!/bin/sh\n[ "$1" = -n ] && [ "$2" = -- ] || exit 2\nshift 2\nexec "$@"\n')
-    sudo.chmod(0o755)
-    cscli = tmp_path / "cscli"
-    cscli.write_text(
-        '#!/bin/sh\n[ "$*" = "alerts list --since 24h --limit 0 -o json" ] || exit 3\n'
-        'printf "[]\\n"\n'
+def test_crowdsec_calls_broker_with_registered_actions(monkeypatch):
+    block = make_block()
+    operation = Mock(
+        side_effect=(
+            BrokerResult(True, "ok", data=[]),
+            BrokerResult(True, "ok"),
+            BrokerResult(True, "ok", data={"count": 2}),
+        )
     )
-    cscli.chmod(0o755)
-    monkeypatch.setenv("PATH", str(tmp_path))
-    monkeypatch.setenv("CROWDSEC_USE_SUDO", "1")
-    monkeypatch.setenv("CROWDSEC_CSCLI", str(cscli))
+    monkeypatch.setattr(block, "execute_privileged_sync", operation)
+    assert block._events() == []
+    assert "зарегистрировано компонентов блокировки: 2" in block._protection_status()
+    assert operation.call_args_list[0].args == ("crowdsec.alerts.read",)
+    assert operation.call_args_list[0].kwargs == {"period": "24h"}
+    assert [call.args[0] for call in operation.call_args_list] == [
+        "crowdsec.alerts.read",
+        "crowdsec.status.read",
+        "crowdsec.bouncers.read",
+    ]
 
-    assert make_block()._events() == []
+
+def test_crowdsec_shows_broker_denial():
+    block = make_block()
+    assert "native broker" in block.dependency_issue()
+    assert "Сводка недоступна" in block.summary()
