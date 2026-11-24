@@ -1,0 +1,10 @@
+[plugin]
+id = "disk"
+name = "Disk"
+description = "Disk usage"
+version = "1.0.0"
+icon = "💿"
+api_version = "1.0"
+sends_alerts = true
+entry_point = "bot.blocks.disk:DiskBlock"
+default_enabled = true

@@ -1,0 +1,9 @@
+[plugin]
+id = "uptime"
+name = "Uptime"
+description = "System uptime"
+version = "1.0.0"
+icon = "🕐"
+api_version = "1.0"
+entry_point = "bot.blocks.uptime:UptimeBlock"
+default_enabled = true

@@ -1,0 +1,9 @@
+[plugin]
+id = "top"
+name = "Processes"
+description = "Top processes"
+version = "1.0.0"
+icon = "⚙️"
+api_version = "1.0"
+entry_point = "bot.blocks.top:TopBlock"
+default_enabled = true

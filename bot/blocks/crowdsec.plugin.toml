@@ -1,0 +1,12 @@
+[plugin]
+id = "crowdsec"
+name = "CrowdSec"
+description = "Статус защиты и сводка CrowdSec"
+version = "1.0.0"
+icon = "🛡️"
+api_version = "1.0"
+sends_alerts = true
+permissions = ["crowdsec.alerts.read", "crowdsec.decisions.read"]
+entry_point = "bot.blocks.crowdsec:CrowdSecBlock"
+default_enabled = false
+extra_actions = ["crowdsec_details"]

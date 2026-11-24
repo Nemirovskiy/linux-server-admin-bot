@@ -1,23 +1,34 @@
 """Public interfaces for Linux Server Admin Bot plugins."""
 
-from bot.api.block import Block
-from bot.api.broker import BrokerResult, NullBroker
-from bot.api.context import PluginContext
+from importlib import import_module
+from typing import TYPE_CHECKING
+
 from bot.api.exceptions import PluginDefinitionError
 from bot.api.metadata import PluginMetadata
-from bot.api.protocols import (
-    AlertProtocol,
-    BrokerProtocol,
-    LoginInfo,
-    ServiceStatus,
-    SystemProtocol,
-    TemperatureReading,
-    UptimeInfo,
-)
 from bot.api.version import PLUGIN_API_VERSION
-from bot.api.views import BlockView
-from bot.models import Alert, CPUMetrics, DiskMetrics, MemoryMetrics, NetworkMetrics, ProcessInfo
-from config import AlertType
+
+if TYPE_CHECKING:
+    from bot.api._runtime import (
+        Alert,
+        AlertProtocol,
+        AlertType,
+        Block,
+        BlockView,
+        BrokerProtocol,
+        BrokerResult,
+        CPUMetrics,
+        DiskMetrics,
+        LoginInfo,
+        MemoryMetrics,
+        NetworkMetrics,
+        NullBroker,
+        PluginContext,
+        ProcessInfo,
+        ServiceStatus,
+        SystemProtocol,
+        TemperatureReading,
+        UptimeInfo,
+    )
 
 __all__ = [
     "Alert",
@@ -43,3 +54,11 @@ __all__ = [
     "TemperatureReading",
     "UptimeInfo",
 ]
+
+
+def __getattr__(name: str):
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module("bot.api._runtime"), name)
+    globals()[name] = value
+    return value

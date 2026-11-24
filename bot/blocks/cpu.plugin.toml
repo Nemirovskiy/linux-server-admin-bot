@@ -1,0 +1,10 @@
+[plugin]
+id = "cpu"
+name = "CPU"
+description = "CPU information"
+version = "1.0.0"
+icon = "🖥️"
+api_version = "1.0"
+sends_alerts = true
+entry_point = "bot.blocks.cpu:CpuBlock"
+default_enabled = true

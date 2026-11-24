@@ -1,0 +1,9 @@
+[plugin]
+id = "temp"
+name = "Temperature"
+description = "System temperature"
+version = "1.0.0"
+icon = "🌡️"
+api_version = "1.0"
+entry_point = "bot.blocks.temp:TempBlock"
+default_enabled = true

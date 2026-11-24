@@ -1,0 +1,9 @@
+[plugin]
+id = "services"
+name = "Services"
+description = "System services"
+version = "1.0.0"
+icon = "🔧"
+api_version = "1.0"
+entry_point = "bot.blocks.services:ServicesBlock"
+default_enabled = true

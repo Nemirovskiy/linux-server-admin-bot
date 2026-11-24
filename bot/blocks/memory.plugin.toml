@@ -1,0 +1,10 @@
+[plugin]
+id = "memory"
+name = "Memory"
+description = "Memory usage"
+version = "1.0.0"
+icon = "💾"
+api_version = "1.0"
+sends_alerts = true
+entry_point = "bot.blocks.memory:MemoryBlock"
+default_enabled = true
