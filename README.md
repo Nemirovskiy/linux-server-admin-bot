@@ -306,6 +306,14 @@ A system administrator installs it separately and grants individual operations.
 Container deployments run the ordinary monitoring blocks without host Docker
 socket access. Use the native installation for privileged host operations.
 
+### External plugins
+
+Install trusted packages into the bot's Python environment. The bot discovers
+`lsab.plugins` entry points and shows them with `lsab plugins list --external`.
+New external plugins are disabled until selected. See the
+[external plugin guide](docs/external-plugins.md) for SDK, compatibility,
+configuration and packaging.
+
 ### Adding a block
 
 Use [Plugin API v1](docs/plugin-api.md) to define a block in

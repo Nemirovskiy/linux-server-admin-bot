@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lsab-plugin-hello-system"
+version = "0.1.0"
+description = "Example external Linux Server Admin Bot plugin"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "Linux Server Admin Bot Contributors"}]
+dependencies = ["lsab-api>=1.1,<2"]
+
+[project.entry-points."lsab.plugins"]
+hello_system = "lsab_hello_system.plugin:HelloSystemBlock"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lsab_hello_system = ["plugin.toml"]

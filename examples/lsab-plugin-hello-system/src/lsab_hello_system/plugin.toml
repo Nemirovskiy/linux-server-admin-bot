@@ -1,0 +1,14 @@
+[plugin]
+id = "hello_system"
+name = "Hello System"
+description = "Server name, OS, and local time"
+api_version = "1.1"
+icon = "🧩"
+default_enabled = false
+
+[permissions]
+required = []
+optional = []
+
+[compatibility]
+platforms = ["linux"]
