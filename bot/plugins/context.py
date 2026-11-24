@@ -20,3 +20,18 @@ class PluginContextFactory:
             alerts=self.alerts,
             broker=NullBroker(),
         )
+
+
+def default_context_factory() -> PluginContextFactory:
+    from bot.services import AlertManager, SystemMonitor
+    from config import settings
+
+    return PluginContextFactory(
+        SystemMonitor(proc_path=settings.host_proc_path, sys_path=settings.host_sys_path),
+        AlertManager(
+            cpu_threshold=settings.cpu_alert_threshold,
+            memory_threshold=settings.memory_alert_threshold,
+            disk_threshold=settings.disk_alert_threshold,
+            cooldown_seconds=settings.alert_cooldown,
+        ),
+    )

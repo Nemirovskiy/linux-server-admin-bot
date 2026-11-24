@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     )
 
     # Telegram Configuration
-    telegram_bot_token: str = Field(..., description="Telegram Bot API Token")
+    telegram_bot_token: str = Field(default="", description="Telegram Bot API Token")
     telegram_allowed_user_ids: str = Field(
-        ..., description="Comma-separated list of allowed user IDs"
+        default="", description="Comma-separated list of allowed user IDs"
     )
 
     # Alert Thresholds
@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     @classmethod
     def validate_user_ids(cls, v: str) -> str:
         """Validate that user IDs are comma-separated integers."""
+        if not v:
+            return v
         try:
             user_ids = [int(uid.strip()) for uid in v.split(",")]
             if not user_ids:
@@ -76,7 +78,11 @@ class Settings(BaseSettings):
     @property
     def allowed_user_ids(self) -> List[int]:
         """Get list of allowed user IDs as integers."""
-        return [int(uid.strip()) for uid in self.telegram_allowed_user_ids.split(",")]
+        return [int(uid.strip()) for uid in self.telegram_allowed_user_ids.split(",") if uid.strip()]
+
+    def require_telegram(self) -> None:
+        if not self.telegram_bot_token.strip() or not self.allowed_user_ids:
+            raise ValueError("Set TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_IDS to start the bot")
 
     @property
     def chart_figsize(self) -> tuple[int, int]:

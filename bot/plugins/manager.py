@@ -46,8 +46,11 @@ class PluginManager:
         self.loader = PluginLoader()
         self.validator = PluginValidator(reserved_commands)
         self._startup_ids: tuple[str, ...] = ()
+        self.defaults: dict[str, bool] = {}
+        self.switches: dict[str, bool] = {}
+        self.config_text: str | None = None
 
-    def discover(self) -> None:
+    def discover(self, *, sync: bool = True, configuration: str | None = None) -> None:
         if any(record.instance is not None for record in self.list_plugins()):
             raise RuntimeError("Stop the plugins before rediscovering")
         self.registry = PluginRegistry()
@@ -56,15 +59,23 @@ class PluginManager:
             for item in source.discover():
                 self._register(item, action_owners)
 
-        defaults = {
+        self.defaults = {
             record.plugin_id: bool(record.descriptor and record.descriptor.default_enabled is True)
             for record in self.list_plugins()
         }
-        config = self.config.sync(defaults)
-        for name in config.keys() - defaults.keys():
+        if configuration is None:
+            revision = (
+                self.config.update_switches({}, self.defaults)
+                if sync else self.config.preview(self.defaults)
+            )
+            self.config_text, self.switches = revision.text, revision.switches
+        else:
+            self.config_text = configuration
+            self.switches = self.config.validate(configuration)
+        for name in self.switches.keys() - self.defaults.keys():
             logger.warning("Configured block '%s' is missing; keeping its setting", name)
         self._startup_ids = tuple(
-            name for name, enabled in config.items() if enabled and name in defaults
+            name for name, enabled in self.switches.items() if enabled and name in self.defaults
         )
         for record in self._ordered_records():
             record.enabled = True
@@ -130,19 +141,27 @@ class PluginManager:
         )
 
     async def load_enabled(self) -> None:
+        for record in self._ordered_records():
+            self._load(record)
+
+    async def diagnose(self, plugin_id: str) -> PluginRecord:
+        record = self.get_plugin(plugin_id)
+        self._load(record)
+        return await self.check(plugin_id)
+
+    def _load(self, record: PluginRecord) -> None:
         if self.context_factory is None:
             raise RuntimeError("A plugin context factory is required to load blocks")
-        for record in self._ordered_records():
-            if record.state not in (PluginState.DISCOVERED, PluginState.STOPPED):
-                continue
-            descriptor = record.descriptor
-            if descriptor is None:
-                continue
-            try:
-                record.instance = self.loader.create_instance(descriptor, self.context_factory)
-                record.state = PluginState.LOADED
-            except Exception as exc:
-                self._fail(record, "load", exc)
+        if record.state not in (PluginState.DISCOVERED, PluginState.STOPPED):
+            return
+        descriptor = record.descriptor
+        if descriptor is None:
+            return
+        try:
+            record.instance = self.loader.create_instance(descriptor, self.context_factory)
+            record.state = PluginState.LOADED
+        except Exception as exc:
+            self._fail(record, "load", exc)
 
     async def setup_all(self) -> None:
         await self._advance("setup", PluginState.LOADED, PluginState.READY)

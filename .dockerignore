@@ -17,3 +17,5 @@ charts/
 
 blocks.toml
 data/config/
+
+.lsab/

@@ -51,11 +51,12 @@ from bot.commands import CORE_COMMANDS
 from bot.handlers import BasicHandlers, CallbackHandlers
 from bot.monitors import HealthMonitor
 from bot.plugins.config import PluginConfig
-from bot.plugins.context import PluginContextFactory
+from bot.plugins.context import default_context_factory
 from bot.plugins.manager import PluginManager
 from bot.plugins.models import PluginState
 from bot.plugins.sources import BuiltinPluginSource
-from bot.services import AlertManager, SystemMonitor
+from bot.runtime_status import RuntimeStatus
+from bot.services import AlertManager
 from config import get_logger, settings, setup_logging
 
 logger = get_logger(__name__)
@@ -83,20 +84,14 @@ class BotApplication:
         )
 
     async def initialize(self, check_only: bool = False) -> None:
-        monitor = SystemMonitor(
-            proc_path=settings.host_proc_path,
-            sys_path=settings.host_sys_path,
-        )
-        self.alerts = AlertManager(
-            cpu_threshold=settings.cpu_alert_threshold,
-            memory_threshold=settings.memory_alert_threshold,
-            disk_threshold=settings.disk_alert_threshold,
-            cooldown_seconds=settings.alert_cooldown,
-        )
+        if not check_only:
+            settings.require_telegram()
+        factory = default_context_factory()
+        self.alerts = factory.alerts
         self.plugin_manager = PluginManager(
             sources=(BuiltinPluginSource(),),
             config=PluginConfig(self.config_path, Path(__file__).with_name("blocks.toml.example")),
-            context_factory=PluginContextFactory(monitor, self.alerts),
+            context_factory=factory,
         )
         try:
             self.plugin_manager.discover()
@@ -205,10 +200,17 @@ class BotApplication:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
+        assert self.plugin_manager is not None
+        status = RuntimeStatus(self.config_path, self.plugin_manager)
         try:
+            status.start()
             await stop_event.wait()
         finally:
-            await self.stop()
+            try:
+                await status.close()
+            finally:
+                await self.stop()
+
 
 
 async def main() -> None:

@@ -68,3 +68,6 @@ docker-compose.override.yml
 # Local block configuration
 blocks.toml
 .blocks-config.lock
+
+# Local management state and backups
+.lsab/
