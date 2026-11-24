@@ -4,13 +4,7 @@ Application constants and enums.
 from enum import Enum
 
 
-class AlertType(str, Enum):
-    """Types of system alerts."""
-
-    CPU = "cpu"
-    MEMORY = "memory"
-    DISK = "disk"
-    CUSTOM = "custom"
+from lsab_api.metrics import AlertType as AlertType
 
 
 class ChartType(str, Enum):

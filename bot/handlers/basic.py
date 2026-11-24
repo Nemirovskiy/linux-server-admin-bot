@@ -13,6 +13,17 @@ from config import COMMANDS, EMOJI, get_logger
 
 logger = get_logger(__name__)
 
+class BlockCommand:
+    """Apply the host's authorization and rate limits to all block commands."""
+
+    def __init__(self, block: Block) -> None:
+        self.block = block
+
+    @standard_handler
+    async def command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self.block.command(update, context)
+
+
 class BasicHandlers:
     def __init__(self, alert_manager: AlertManager, blocks: Sequence[Block]) -> None:
         self.alert_manager = alert_manager

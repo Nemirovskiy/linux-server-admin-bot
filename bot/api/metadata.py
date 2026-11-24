@@ -1,17 +1,3 @@
-"""Plugin metadata used for discovery, routing, and presentation."""
+"""Compatibility imports for the standalone Plugin API."""
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class PluginMetadata:
-    """Declare a plugin ID, display name, and capabilities."""
-
-    id: str
-    name: str
-    description: str
-    version: str
-    icon: str
-    api_version: str = "1.0"
-    sends_alerts: bool = False
-    permissions: tuple[str, ...] = ()
+from lsab_api.metadata import PluginMetadata as PluginMetadata

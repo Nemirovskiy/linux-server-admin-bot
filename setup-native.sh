@@ -81,6 +81,7 @@ fi
 
 echo "Installing Python dependencies in .venv"
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --no-deps ./packages/lsab-api
 .venv/bin/python -m pip install --no-deps -e .
 
 echo "Checking block configuration and dependencies"

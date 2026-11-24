@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lsab-api"
+dynamic = ["version"]
+description = "Plugin API for Linux Server Admin Bot"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["python-telegram-bot>=21,<22"]
+
+[tool.setuptools.dynamic]
+version = {attr = "lsab_api.version.PLUGIN_API_VERSION"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lsab_api = ["py.typed"]

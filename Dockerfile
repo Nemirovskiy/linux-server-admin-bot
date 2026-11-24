@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements and install dependencies to a specific location
 COPY requirements.txt .
 RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
+COPY packages/lsab-api/ ./packages/lsab-api/
+RUN pip install --prefix=/install --no-cache-dir --no-deps ./packages/lsab-api
 
 
 # Final stage

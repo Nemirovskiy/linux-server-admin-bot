@@ -2,28 +2,13 @@
 Text formatting utilities for Telegram messages.
 """
 
+from lsab_api.presentation import escape_markdown as escape_markdown
+
 from bot.models import (
     DiskMetrics,
     SystemStatus,
 )
 from config.constants import EMOJI
-
-
-def escape_markdown(text: str) -> str:
-    """
-    Escape special characters for Telegram MarkdownV2.
-
-    Args:
-        text: Text to escape
-
-    Returns:
-        Escaped text
-    """
-    text = text.replace("\\", "\\\\")
-    special_chars = ["_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"]
-    for char in special_chars:
-        text = text.replace(char, f"\\{char}")
-    return text
 
 
 def format_bytes(bytes_value: int) -> str:

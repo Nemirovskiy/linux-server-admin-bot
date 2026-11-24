@@ -49,6 +49,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 from bot.api import Block
 from bot.commands import CORE_COMMANDS
 from bot.handlers import BasicHandlers, CallbackHandlers
+from bot.handlers.basic import BlockCommand
 from bot.monitors import HealthMonitor
 from bot.plugins.config import PluginConfig
 from bot.plugins.context import default_context_factory
@@ -130,7 +131,7 @@ class BotApplication:
         for command in CORE_COMMANDS:
             self.app.add_handler(CommandHandler(command, getattr(basic, f"{command}_command")))
         for block in blocks:
-            self.app.add_handler(CommandHandler(block.metadata.id, block.command))
+            self.app.add_handler(CommandHandler(block.metadata.id, BlockCommand(block).command))
         self.app.add_handler(CallbackQueryHandler(callbacks.handle_callback))
 
         checks = manager.alert_checks()

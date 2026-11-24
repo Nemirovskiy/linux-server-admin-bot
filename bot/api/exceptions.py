@@ -1,5 +1,3 @@
-"""Errors in a plugin definition."""
+"""Compatibility imports for the standalone Plugin API."""
 
-
-class PluginDefinitionError(ValueError):
-    """A plugin cannot be discovered or registered with its declared metadata."""
+from lsab_api.exceptions import PluginDefinitionError as PluginDefinitionError

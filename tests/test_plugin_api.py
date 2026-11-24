@@ -31,7 +31,7 @@ def test_metadata_view_and_context():
     config["message"] = "Changed externally"
     block = ExampleBlock(context)
 
-    assert PLUGIN_API_VERSION == "1.0.0"
+    assert PLUGIN_API_VERSION == "1.1.0"
     assert block.metadata.api_version == "1.0"
     assert block.metadata.version == "2.3.4"
     assert block.metadata.permissions == ()

@@ -1,3 +1,3 @@
-"""Version of the public plugin contract, independent of the bot version."""
+"""Compatibility imports for the standalone Plugin API."""
 
-PLUGIN_API_VERSION = "1.0.0"
+from lsab_api.version import PLUGIN_API_VERSION as PLUGIN_API_VERSION

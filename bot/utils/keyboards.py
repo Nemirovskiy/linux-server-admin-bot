@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from lsab_api.presentation import get_back_to_main_keyboard as get_back_to_main_keyboard
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import EMOJI
@@ -29,18 +30,5 @@ def get_main_menu_keyboard(blocks: Sequence[Block]) -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"{EMOJI['alert']} Alerts", callback_data="cmd_alerts"),
             InlineKeyboardButton(f"{EMOJI['help']} Help", callback_data="cmd_help"),
         ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def get_back_to_main_keyboard() -> InlineKeyboardMarkup:
-    """Get a simple back to main menu keyboard."""
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['back']} Back to Menu",
-                callback_data="menu_main"
-            )
-        ]
     ]
     return InlineKeyboardMarkup(keyboard)

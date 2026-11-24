@@ -1,0 +1,181 @@
+"""
+Data models for system metrics, alerts, and responses.
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+
+
+class AlertType(str, Enum):
+    """Types of system alerts."""
+
+    CPU = "cpu"
+    MEMORY = "memory"
+    DISK = "disk"
+    CUSTOM = "custom"
+
+
+@dataclass
+class CPUMetrics:
+    """CPU usage metrics."""
+
+    percent: float
+    count: int
+    per_cpu: list[float]
+    frequency_current: float | None = None
+    frequency_min: float | None = None
+    frequency_max: float | None = None
+    load_avg: tuple[float, float, float] | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryMetrics:
+    """Memory usage metrics."""
+
+    total: int  # bytes
+    available: int  # bytes
+    used: int  # bytes
+    percent: float
+    swap_total: int = 0
+    swap_used: int = 0
+    swap_percent: float = 0.0
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def total_gb(self) -> float:
+        """Total memory in GB."""
+        return self.total / (1024**3)
+
+    @property
+    def used_gb(self) -> float:
+        """Used memory in GB."""
+        return self.used / (1024**3)
+
+    @property
+    def available_gb(self) -> float:
+        """Available memory in GB."""
+        return self.available / (1024**3)
+
+
+@dataclass
+class DiskMetrics:
+    """Disk usage metrics."""
+
+    total: int  # bytes
+    used: int  # bytes
+    free: int  # bytes
+    percent: float
+    mount_point: str = "/"
+    device: str = ""
+    fstype: str = ""
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def total_gb(self) -> float:
+        """Total disk space in GB."""
+        return self.total / (1024**3)
+
+    @property
+    def used_gb(self) -> float:
+        """Used disk space in GB."""
+        return self.used / (1024**3)
+
+    @property
+    def free_gb(self) -> float:
+        """Free disk space in GB."""
+        return self.free / (1024**3)
+
+    @property
+    def total_tb(self) -> float:
+        """Total disk space in TB."""
+        return self.total / (1024**4)
+
+    @property
+    def used_tb(self) -> float:
+        """Used disk space in TB."""
+        return self.used / (1024**4)
+
+    @property
+    def free_tb(self) -> float:
+        """Free disk space in TB."""
+        return self.free / (1024**4)
+
+
+@dataclass
+class NetworkMetrics:
+    """Network interface metrics."""
+
+    interface: str
+    bytes_sent: int
+    bytes_recv: int
+    packets_sent: int
+    packets_recv: int
+    errors_in: int = 0
+    errors_out: int = 0
+    drops_in: int = 0
+    drops_out: int = 0
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def bytes_sent_mb(self) -> float:
+        """Bytes sent in MB."""
+        return self.bytes_sent / (1024**2)
+
+    @property
+    def bytes_recv_mb(self) -> float:
+        """Bytes received in MB."""
+        return self.bytes_recv / (1024**2)
+
+
+@dataclass
+class ProcessInfo:
+    """Process information."""
+
+    pid: int
+    name: str
+    cpu_percent: float
+    memory_percent: float
+    memory_mb: float
+    status: str
+    username: str = ""
+    create_time: datetime | None = None
+
+
+@dataclass
+class Alert:
+    """System alert."""
+
+    alert_type: AlertType
+    title: str
+    message: str
+    severity: str  # info, warning, critical
+    metric_value: float
+    threshold: float
+    timestamp: datetime = field(default_factory=datetime.now)
+    acknowledged: bool = False
+
+    def __str__(self) -> str:
+        """String representation of alert."""
+        return f"[{self.severity.upper()}] {self.title}: {self.message}"
+
+
+@dataclass
+class SystemStatus:
+    """Overall system status summary."""
+
+    cpu: CPUMetrics
+    memory: MemoryMetrics
+    disk: DiskMetrics
+    uptime_seconds: float
+    boot_time: datetime
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def uptime_formatted(self) -> str:
+        """Get formatted uptime string."""
+        days = int(self.uptime_seconds // 86400)
+        hours = int((self.uptime_seconds % 86400) // 3600)
+        minutes = int((self.uptime_seconds % 3600) // 60)
+        return f"{days}d {hours}h {minutes}m"
