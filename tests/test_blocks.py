@@ -256,21 +256,29 @@ def test_working_config_is_seeded_and_updated_without_replacing_values(tmp_path)
 
     original = "[blocks]\n# Only disk on this server\ndisk = true\ncpu = false"
     path.write_text(original)
-    assert select_blocks(path, ("cpu", "disk", "crowdsec"), template) == ("disk",)
-    assert path.read_text() == original + "\ncrowdsec = false\n"
+    assert select_blocks(path, ("cpu", "disk", "example"), template) == ("disk",)
+    assert path.read_text() == original + "\nexample = false\n"
 
     path.write_text("[blocks]\ncpu = invalid\n")
     with pytest.raises(ValueError):
-        select_blocks(path, ("cpu", "disk", "crowdsec"), template)
+        select_blocks(path, ("cpu", "disk", "example"), template)
     assert path.read_text() == "[blocks]\ncpu = invalid\n"
 
 
 async def test_config_check_reports_missing_dependencies(tmp_path, monkeypatch):
     path = tmp_path / "blocks.toml"
-    path.write_text("[blocks]\ncrowdsec = true\n")
+    path.write_text("[blocks]\ndocker = true\n")
     monkeypatch.setattr(
-        "bot.blocks.crowdsec.CrowdSecBlock.dependency_issue",
-        lambda self: "Install cscli",
+        "bot.blocks.docker.DockerBlock.dependency_issue",
+        lambda self: "Docker socket unavailable",
     )
-    with pytest.raises(ValueError, match="crowdsec: Install cscli"):
+    with pytest.raises(ValueError, match="docker: Docker socket unavailable"):
         await BotApplication(path).initialize(check_only=True)
+
+
+def test_removed_crowdsec_switch_is_preserved_and_ignored(tmp_path):
+    path = tmp_path / "blocks.toml"
+    original = "[blocks]\ncpu = true\ncrowdsec = true\n"
+    path.write_text(original)
+    assert select_blocks(path, ("cpu",)) == ("cpu",)
+    assert path.read_text() == original

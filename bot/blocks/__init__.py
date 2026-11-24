@@ -71,7 +71,8 @@ def _switches(text: str, known: Iterable[str]) -> dict[str, bool]:
         raise ValueError("Expected a single [blocks] table")
 
     switches = document["blocks"]
-    unknown = switches.keys() - known
+    # Keep old local files usable when the CrowdSec provider is absent.
+    unknown = switches.keys() - known - {"crowdsec"}
     if unknown:
         raise ValueError(f"Unknown blocks: {', '.join(sorted(unknown))}")
     for name, enabled in switches.items():
@@ -129,4 +130,4 @@ def select_blocks(
                 finally:
                     temporary.unlink(missing_ok=True)
 
-    return tuple(name for name, enabled in switches.items() if enabled)
+    return tuple(name for name, enabled in switches.items() if enabled and name in known)

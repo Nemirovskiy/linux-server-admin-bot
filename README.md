@@ -146,7 +146,6 @@ Just type `/start` to see the interactive menu!
 
 #### Optional blocks
 - `/docker` - Docker container management menu
-- `/crowdsec` - CrowdSec protection status and 24-hour summary
 
 See [Information blocks](#information-blocks) to enable or disable these commands.
 
@@ -228,7 +227,6 @@ Edit the local `[blocks]` table over SSH. Set a block to `true` to enable it or
 [blocks]
 network = false
 docker = false
-crowdsec = true
 ```
 
 | Switch | Telegram command | Fresh install |
@@ -242,7 +240,6 @@ crowdsec = true
 | `uptime` | `/uptime` | On |
 | `services` | `/services` | On |
 | `docker` | `/docker` | Off |
-| `crowdsec` | `/crowdsec` | Off |
 
 The selection applies to everyone using the bot. When you disable a block,
 its button, command, status summary and scheduled checks are removed.
@@ -303,29 +300,6 @@ docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d --force-
 
 To disable management and remove access to the socket, set `docker = false` and
 recreate the service using just the base Compose file.
-
-### CrowdSec
-
-Set `crowdsec = true` in the local `blocks.toml`, then follow the validation
-and restart commands for your installation above. Open CrowdSec from `/start`
-or use `/crowdsec` for the main screen. The **Подробнее** button appears when
-alerts exist in the last 24 hours. It shows scenario counts and recent alerts.
-To disable the block and stop its Telegram notifications, set `crowdsec = false`
-and apply the change the same way. The IP total counts distinct
-addresses with a ban decision in those alerts, including expired decisions.
-LAPI availability and registered bouncers are shown separately from the totals.
-
-CrowdSec parses its configured log sources. The bot reads the resulting alerts
-and checks for new detections on the normal `ALERT_CHECK_INTERVAL`. It groups
-new detections into one notification per check and starts counting from the
-bot startup time. Historical alerts remain visible in the summary.
-
-Run `cscli alerts list --since 24h --limit 0 -o json` as the account that runs
-the bot to verify access. The bot calls `cscli` directly without an interactive
-sudo prompt. Set `CROWDSEC_CSCLI` in the process environment to use a different
-executable. For Docker Compose, provide `cscli` and access to the relevant
-CrowdSec configuration inside the bot container. The standard bot image
-ships without `cscli`.
 
 ### Adding a block
 
