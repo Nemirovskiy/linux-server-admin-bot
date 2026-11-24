@@ -2,7 +2,7 @@
 Configuration settings using Pydantic for validation and type safety.
 """
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_calls: int = Field(default=10, ge=1, description="Max calls per period")
     rate_limit_period: int = Field(default=60, ge=1, description="Rate limit period in seconds")
+
+    lsab_broker: Literal["off", "sudo"] = "off"
 
     # Logging
     log_level: str = Field(default="INFO", description="Logging level")

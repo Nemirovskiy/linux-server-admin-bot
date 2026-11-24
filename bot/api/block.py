@@ -51,6 +51,15 @@ class Block(ABC):
     async def execute_privileged(self, action: str, **params: Any) -> BrokerResult:
         return await self.context.broker.execute(action, params)
 
+    def execute_privileged_sync(self, action: str, **params: Any) -> BrokerResult:
+        """Use the synchronous broker interface from a block's worker thread."""
+        execute = getattr(self.context.broker, "execute_sync", None)
+        if not callable(execute):
+            return BrokerResult(
+                False, "Synchronous broker access is unavailable.", "BROKER_UNAVAILABLE"
+            )
+        return execute(action, params)
+
     @abstractmethod
     def summary(self) -> str:
         """Return a short, plain-text summary."""

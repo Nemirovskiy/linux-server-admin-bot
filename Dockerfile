@@ -33,6 +33,7 @@ COPY --from=builder /install /usr/local
 
 # Copy application code
 COPY bot/ ./bot/
+COPY broker/ ./broker/
 COPY config/ ./config/
 COPY cli/ ./cli/
 COPY main.py .

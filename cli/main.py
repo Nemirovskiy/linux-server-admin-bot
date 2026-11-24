@@ -71,6 +71,16 @@ def parser() -> argparse.ArgumentParser:
         commands.add_parser(name, help=help_text)
     logs = commands.add_parser("logs", help="read recent service logs")
     logs.add_argument("--follow", action="store_true")
+    broker = commands.add_parser("broker", help="diagnose the native privilege broker")
+    broker_actions = broker.add_subparsers(dest="action", required=True)
+    for name in ("status", "version", "doctor", "actions"):
+        broker_actions.add_parser(name)
+    broker_actions.add_parser("info").add_argument("id")
+    permissions = commands.add_parser("permissions", help="inspect plugin permission requests and grants")
+    permissions_actions = permissions.add_subparsers(dest="action", required=True)
+    for name in ("list", "requested", "granted", "missing", "browse"):
+        action = permissions_actions.add_parser(name)
+        action.add_argument("id", nargs="?" if name in {"list", "browse"} else None)
     return root
 
 
@@ -206,8 +216,16 @@ def _run(args: argparse.Namespace) -> int:
         data = {"version": __version__, "plugin_api_version": PLUGIN_API_VERSION}
         emit(data, as_json=args.json, text=f"lsab {__version__} (Plugin API {PLUGIN_API_VERSION})")
         return 0
+    if args.command == "broker":
+        from cli.broker import broker_command
+
+        return broker_command(args)
     project, config = _locations(args)
     management = PluginManagement(config)
+    if args.command == "permissions":
+        from cli.broker import permissions_command
+
+        return permissions_command(args, management)
     if args.command == "plugins":
         return _plugins(args, management, project)
 

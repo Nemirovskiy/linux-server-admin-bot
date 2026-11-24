@@ -7,8 +7,8 @@ import select
 import sys
 import termios
 import tty
-from collections.abc import Mapping
-from typing import Protocol
+from collections.abc import Callable, Mapping
+from typing import Protocol, TypeVar
 
 
 class Screen(Protocol):
@@ -19,7 +19,14 @@ class Screen(Protocol):
     def key(self) -> str: ...
 
 
+T = TypeVar("T")
+
+
 def open_configure(plugins: list[dict]) -> dict[str, bool] | None:
+    return open_terminal(lambda screen: configure(screen, plugins))
+
+
+def open_terminal(work: Callable[[Screen], T]) -> T:
     try:
         import curses
     except ImportError:
@@ -28,13 +35,13 @@ def open_configure(plugins: list[dict]) -> dict[str, bool] | None:
         try:
             tty.setcbreak(screen.fd)
             sys.stdout.write("\x1b[?1049h\x1b[?25l")
-            return configure(screen, plugins)
+            return work(screen)
         finally:
             termios.tcsetattr(screen.fd, termios.TCSADRAIN, previous)
             sys.stdout.write("\x1b[0m\x1b[?25h\x1b[?1049l")
             sys.stdout.flush()
     try:
-        return curses.wrapper(lambda window: configure(CursesScreen(window, curses), plugins))
+        return curses.wrapper(lambda window: work(CursesScreen(window, curses)))
     except curses.error as exc:
         raise ValueError(
             "Could not open the terminal interface. Check TERM and terminal size."
