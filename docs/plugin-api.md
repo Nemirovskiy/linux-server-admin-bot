@@ -6,9 +6,9 @@
 
 ## Пример блока
 
-Сохраните пример в `bot/blocks/load.py`. В файле должен быть один конкретный
-подкласс `Block`. Укажите `load = true` в таблице `[blocks]` файла
-`blocks.toml`, выполните `python main.py --check-blocks` и перезапустите
+Сохраните класс в `bot/blocks/load.py`, а его манифест в
+`bot/blocks/load.plugin.toml`. Укажите `load = true` в таблице `[blocks]`
+файла `blocks.toml`, выполните `python main.py --check-blocks` и перезапустите
 бота. Появятся команда `/load`, кнопка в меню и раздел в `/status`.
 
 ```python
@@ -28,6 +28,22 @@ class LoadBlock(Block):
         metrics = self.context.system.get_cpu_metrics(interval=0.5)
         return f"{metrics.percent:.1f}%"
 ```
+
+```toml
+[plugin]
+id = "load"
+name = "CPU Load"
+description = "Current CPU load"
+version = "1.0.0"
+icon = "🖥️"
+entry_point = "bot.blocks.load:LoadBlock"
+default_enabled = false
+```
+
+Если модуль объявляет `extra_actions`, `permissions` или `sends_alerts`,
+укажите их также в манифесте. Манифест определяет данные для обнаружения,
+а загрузчик проверяет совпадение с классом. Старым локальным блокам тоже
+требуется манифест. Подробнее см. [Plugin Registry](plugin-registry.md).
 
 ## Контракт
 
@@ -67,8 +83,8 @@ class LoadBlock(Block):
 `PLUGIN_API_VERSION` хранит версию контракта независимо от версии бота.
 Patch исправляет ошибки, minor добавляет обратно совместимые возможности,
 major меняет контракт несовместимо. Для API v1 значение
-`PluginMetadata.api_version` по умолчанию равно `"1.0"`. Поддержка диапазонов
-совместимости понадобится при подключении внешних пакетов.
+`PluginMetadata.api_version` по умолчанию равно `"1.0"`. Загрузчик допускает версии с той же major-версией и требуемой версией API
+до уровня, предоставленного ядром.
 
 Существующие локальные блоки, наследующие `Block` из `bot.blocks` или
 `bot.blocks.base`, могут использовать прежние атрибуты

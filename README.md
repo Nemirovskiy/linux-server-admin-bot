@@ -105,7 +105,7 @@ sudo chmod -R 775 logs
 
 4. **Build and run with Docker Compose**
 ```bash
-docker-compose up -d
+docker-compose up -d --build
 ```
 
 5. **Check logs**
@@ -220,6 +220,7 @@ linux-server-admin-bot/
 The bot reads a local, Git-ignored `blocks.toml`. On first startup it copies
 the tracked `blocks.toml.example`. On later starts it appends newly discovered
 blocks with `false`, preserving existing values, comments and ordering.
+Settings for removed blocks are kept in case the block is restored.
 Edit the local `[blocks]` table over SSH. Set a block to `true` to enable it or
 `false` to disable it. For example, change the existing lines in your file:
 
@@ -240,6 +241,7 @@ docker = false
 | `uptime` | `/uptime` | On |
 | `services` | `/services` | On |
 | `docker` | `/docker` | Off |
+| `crowdsec` | `/crowdsec` | Off |
 
 The selection applies to everyone using the bot. When you disable a block,
 its button, command, status summary and scheduled checks are removed.
@@ -273,11 +275,13 @@ fi
 sudo chown -R 1000:1000 data/config
 ```
 
-After editing `data/config/blocks.toml`, check the configuration and recreate
-the service:
+Compose builds the core and built-in manifests from this checkout. After
+updating the source or editing `data/config/blocks.toml`, build and validate
+the image before recreating the service.
 
 ```bash
-docker compose run --rm --no-deps linux-server-admin-bot python main.py --check-blocks &&
+docker compose build linux-server-admin-bot &&
+  docker compose run --rm --no-deps linux-server-admin-bot python main.py --check-blocks &&
   docker compose up -d --force-recreate linux-server-admin-bot
 ```
 
@@ -304,13 +308,10 @@ recreate the service using just the base Compose file.
 ### Adding a block
 
 Use [Plugin API v1](docs/plugin-api.md) to define a block in
-[`bot/blocks/`](bot/blocks/). The bot discovers block files at startup and
-enables only the blocks selected in `blocks.toml`. The order of entries
-in the config determines their order in the menu and status.
-
-See the [block architecture](docs/architecture.md) for startup, routing
-and alert delivery. Block files are imported during startup and config
-validation. Keep runtime work inside block methods.
+[`bot/blocks/`](bot/blocks/) and add a matching `*.plugin.toml` manifest.
+The [Plugin Registry](docs/plugin-registry.md) reads manifests and imports only
+enabled modules. The config file determines their order in the menu and
+status. Keep runtime work inside block methods.
 
 ## 🎨 Bot Avatar
 
