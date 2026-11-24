@@ -57,3 +57,20 @@ def mock_bot_context():
     context.bot.send_chat_action = Mock()
     
     return context
+
+
+@pytest.fixture
+def offline_telegram(monkeypatch):
+    """Keep real command registration and stub the Telegram network and scheduler."""
+    from unittest.mock import AsyncMock, Mock
+
+    from telegram.ext import Application, ExtBot, Updater
+
+    from bot.monitors import HealthMonitor
+
+    for method in ("initialize", "start", "stop", "shutdown"):
+        monkeypatch.setattr(Application, method, AsyncMock())
+    for method in ("start_polling", "stop"):
+        monkeypatch.setattr(Updater, method, AsyncMock())
+    monkeypatch.setattr(ExtBot, "set_my_commands", AsyncMock())
+    monkeypatch.setattr(HealthMonitor, "start", Mock())

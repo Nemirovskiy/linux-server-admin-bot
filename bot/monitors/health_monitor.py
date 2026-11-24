@@ -28,6 +28,8 @@ class HealthMonitor:
         self.bot_app = bot_app
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._alert_chat_ids: set[int] = set()
+        self._check_lock = asyncio.Lock()
+        self._stopping = False
 
     def register_alert_chat(self, chat_id: int) -> None:
         """
@@ -51,13 +53,16 @@ class HealthMonitor:
 
     async def check_system_health(self) -> None:
         """Check system health and trigger alerts if needed."""
-        for check in self.checks:
-            try:
-                alert = await asyncio.to_thread(check)
-                if alert:
-                    await self._send_alert_to_chats(alert)
-            except Exception:
-                logger.exception("Error checking an enabled block for alerts")
+        async with self._check_lock:
+            for check in self.checks:
+                if self._stopping:
+                    return
+                try:
+                    alert = await asyncio.to_thread(check)
+                    if alert and not self._stopping:
+                        await self._send_alert_to_chats(alert)
+                except Exception:
+                    logger.exception("Error checking an enabled block for alerts")
 
     async def _send_alert_to_chats(self, alert: Alert) -> None:
         """
@@ -109,6 +114,7 @@ class HealthMonitor:
             logger.warning("Health monitor already running")
             return
 
+        self._stopping = False
         self.scheduler = AsyncIOScheduler()
         
         # Schedule health check
@@ -127,10 +133,17 @@ class HealthMonitor:
         for user_id in settings.allowed_user_ids:
             self.register_alert_chat(user_id)
 
-    def stop(self) -> None:
-        """Stop the health monitoring scheduler."""
+    async def stop(self) -> None:
+        """Drain an in-flight check before releasing plugin resources."""
+        self._stopping = True
         if self.scheduler and self.scheduler.running:
-            self.scheduler.shutdown()
-            logger.info("Health monitor stopped")
-        else:
-            logger.warning("Health monitor not running")
+            self.scheduler.pause()
+        try:
+            async with asyncio.timeout(15), self._check_lock:
+                pass
+        except TimeoutError:
+            logger.warning("Timed out waiting for a plugin alert check to finish")
+        finally:
+            if self.scheduler and self.scheduler.running:
+                self.scheduler.shutdown()
+                logger.info("Health monitor stopped")

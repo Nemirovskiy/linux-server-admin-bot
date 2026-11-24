@@ -12,9 +12,12 @@ logger = get_logger(__name__)
 
 
 class CallbackHandlers:
-    def __init__(self, basic: BasicHandlers, disabled_actions: set[str]) -> None:
+    def __init__(
+        self, basic: BasicHandlers, disabled_actions: set[str], failed_actions: set[str]
+    ) -> None:
         self.basic = basic
         self.disabled_actions = disabled_actions
+        self.failed_actions = failed_actions
         self.block_actions = {
             action: block.callback
             for block in basic.blocks
@@ -50,6 +53,10 @@ class CallbackHandlers:
                 )
             elif action in self.block_actions:
                 await self.block_actions[action](query, context)
+            elif action in self.failed_actions:
+                await query.edit_message_text(
+                    "This block is unavailable.", reply_markup=get_back_to_main_keyboard()
+                )
             elif action in self.disabled_actions:
                 await query.edit_message_text(
                     "This block is disabled.", reply_markup=get_back_to_main_keyboard()

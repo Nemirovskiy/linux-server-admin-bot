@@ -46,12 +46,15 @@ from typing import Optional
 from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
-from bot.api import Block, NullBroker, PluginContext
-from bot.blocks import Block as LegacyBlock
-from bot.blocks import discover_blocks, select_blocks
+from bot.api import Block
+from bot.commands import CORE_COMMANDS
 from bot.handlers import BasicHandlers, CallbackHandlers
-from bot.handlers.basic import CORE_COMMANDS
 from bot.monitors import HealthMonitor
+from bot.plugins.config import PluginConfig
+from bot.plugins.context import PluginContextFactory
+from bot.plugins.manager import PluginManager
+from bot.plugins.models import PluginState
+from bot.plugins.sources import BuiltinPluginSource
 from bot.services import AlertManager, SystemMonitor
 from config import get_logger, settings, setup_logging
 
@@ -64,70 +67,84 @@ class BotApplication:
     def __init__(self, config_path: Path) -> None:
         self.config_path = config_path
         self.app: Optional[Application] = None
-        self.blocks: tuple[Block, ...] = ()
+        self.plugin_manager: PluginManager | None = None
+        self.alerts: AlertManager | None = None
         self.health_monitor: Optional[HealthMonitor] = None
         self._shutdown = AsyncExitStack()
 
-    async def initialize(self, check_only: bool = False) -> None:
-        providers = discover_blocks(CORE_COMMANDS)
-        try:
-            enabled = select_blocks(self.config_path, providers, Path(__file__).with_name("blocks.toml.example"))
-        except (OSError, ValueError) as exc:
-            raise ValueError(f"{self.config_path}: {exc}") from exc
+    @property
+    def blocks(self) -> tuple[Block, ...]:
+        if self.plugin_manager is None:
+            return ()
+        return tuple(
+            record.instance
+            for record in self.plugin_manager.startup_records()
+            if record.instance is not None
+        )
 
+    async def initialize(self, check_only: bool = False) -> None:
         monitor = SystemMonitor(
             proc_path=settings.host_proc_path,
             sys_path=settings.host_sys_path,
         )
-        alerts = AlertManager(
+        self.alerts = AlertManager(
             cpu_threshold=settings.cpu_alert_threshold,
             memory_threshold=settings.memory_alert_threshold,
             disk_threshold=settings.disk_alert_threshold,
             cooldown_seconds=settings.alert_cooldown,
         )
-        broker = NullBroker()
-        blocks = []
-        for name in enabled:
-            provider = providers[name]
-            context = PluginContext(name, {}, get_logger(provider.__module__), monitor, alerts, broker)
-            block = provider._from_context(context) if issubclass(provider, LegacyBlock) else provider(context)
-            blocks.append(block)
-        self.blocks = tuple(blocks)
+        self.plugin_manager = PluginManager(
+            sources=(BuiltinPluginSource(),),
+            config=PluginConfig(self.config_path, Path(__file__).with_name("blocks.toml.example")),
+            context_factory=PluginContextFactory(monitor, self.alerts),
+        )
+        try:
+            self.plugin_manager.discover()
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"{self.config_path}: {exc}") from exc
         if check_only:
-            print(f"Enabled blocks: {', '.join(enabled) or 'none'}")
-            issues = []
-            for block in self.blocks:
-                issue = block.dependency_issue()
-                if issue:
-                    issues.append(f"{block.metadata.id}: {issue}")
+            await self.plugin_manager.load_enabled()
+            await self.plugin_manager.check_enabled()
+            records = self.plugin_manager.startup_records()
+            print(f"Enabled blocks: {', '.join(record.plugin_id for record in records) or 'none'}")
+            issues = [
+                f"{record.plugin_id}: {record.error or record.dependency_issue}"
+                for record in records if record.error or record.dependency_issue
+            ]
             if issues:
                 raise ValueError("\n".join(issues))
             return
 
         self.app = Application.builder().token(settings.telegram_bot_token).build()
-        basic = BasicHandlers(alerts, self.blocks)
-        disabled_actions = {
-            action
-            for name, provider in providers.items() if name not in enabled
-            for action in (f"cmd_{name}", *provider.extra_actions)
-        }
-        callbacks = CallbackHandlers(basic, disabled_actions)
+
+    def _register_handlers(self) -> None:
+        manager = self.plugin_manager
+        blocks = manager.running_blocks()
+        basic = BasicHandlers(self.alerts, blocks)
+        disabled_actions = set()
+        failed_actions = set()
+        for record in manager.list_plugins():
+            declared = record.descriptor.actions if record.descriptor else (f"cmd_{record.plugin_id}",)
+            actions = {action for action in declared if isinstance(action, str)}
+            if not record.enabled:
+                disabled_actions.update(actions)
+            elif record.state is PluginState.FAILED:
+                failed_actions.update(actions)
+        callbacks = CallbackHandlers(basic, disabled_actions, failed_actions)
 
         for command in CORE_COMMANDS:
             self.app.add_handler(CommandHandler(command, getattr(basic, f"{command}_command")))
-        for block in self.blocks:
+        for block in blocks:
             self.app.add_handler(CommandHandler(block.metadata.id, block.command))
         self.app.add_handler(CallbackQueryHandler(callbacks.handle_callback))
 
-        checks = [block.poll_alert for block in self.blocks if block.metadata.sends_alerts]
-        if checks:
-            self.health_monitor = HealthMonitor(checks, self.app)
-
-        logger.info("Enabled blocks: %s", ", ".join(enabled) or "none")
+        checks = manager.alert_checks()
+        self.health_monitor = HealthMonitor(checks, self.app) if checks else None
+        logger.info("Running blocks: %s", ", ".join(block.metadata.id for block in blocks) or "none")
 
     async def start(self) -> None:
         """Start the bot application."""
-        if not self.app:
+        if self.app is None or self.plugin_manager is None:
             raise RuntimeError("Application not initialized")
 
         logger.info("Starting bot application...")
@@ -138,18 +155,19 @@ class BotApplication:
             await self.app.start()
             shutdown.push_async_callback(self.app.stop)
 
-            for block in self.blocks:
-                shutdown.push_async_callback(block.stop)
-                await block.setup()
-            for block in self.blocks:
-                await block.start()
+            shutdown.push_async_callback(self.plugin_manager.stop_all)
+            await self.plugin_manager.load_enabled()
+            await self.plugin_manager.setup_all()
+            await self.plugin_manager.start_all()
+            await self.plugin_manager.check_enabled()
 
+            self._register_handlers()
             await self._set_bot_commands()
             await self.app.updater.start_polling(drop_pending_updates=True)
             shutdown.push_async_callback(self.app.updater.stop)
             if self.health_monitor:
+                shutdown.push_async_callback(self.health_monitor.stop)
                 self.health_monitor.start()
-                shutdown.callback(self.health_monitor.stop)
 
             self._shutdown = shutdown.pop_all()
 
@@ -158,7 +176,7 @@ class BotApplication:
     async def _set_bot_commands(self) -> None:
         """Set the bot commands menu visible in Telegram."""
         commands = [BotCommand(name, description) for name, description in CORE_COMMANDS.items()]
-        commands.extend(BotCommand(block.metadata.id, block.metadata.description) for block in self.blocks)
+        commands.extend(BotCommand(block.metadata.id, block.metadata.description) for block in self.plugin_manager.running_blocks())
 
         await self.app.bot.set_my_commands(commands)
         logger.info("Bot commands menu configured")

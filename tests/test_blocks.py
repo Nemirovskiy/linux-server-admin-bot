@@ -5,10 +5,20 @@ import pytest
 from telegram.error import TimedOut
 from telegram.ext import CallbackQueryHandler, CommandHandler
 
-from bot.blocks import BlockView, select_blocks
+from bot.blocks import BlockView
 from bot.models import CPUMetrics, DiskMetrics, MemoryMetrics
+from bot.plugins.config import PluginConfig
 from config import settings
 from main import BotApplication
+
+pytestmark = pytest.mark.usefixtures("offline_telegram")
+
+
+async def initialize_app(path):
+    app = BotApplication(path)
+    await app.initialize()
+    await app.start()
+    return app
 
 
 def test_invalid_block_switches(tmp_path):
@@ -17,19 +27,17 @@ def test_invalid_block_switches(tmp_path):
 
     path.write_text('[blocks]\ncpu = "false"\n')
     with pytest.raises(ValueError, match="must be true or false"):
-        select_blocks(path, defaults)
+        PluginConfig(path).sync(defaults)
 
     path.write_text("[blocks]\ncup = false\n")
-    with pytest.raises(ValueError, match="Unknown blocks: cup"):
-        select_blocks(path, defaults)
+    assert PluginConfig(path).sync(defaults) == {"cup": False, "cpu": False, "docker": False}
 
 
 async def test_switches_control_commands_menu_status_and_alerts(tmp_path, monkeypatch):
     path = tmp_path / "blocks.toml"
     path.write_text("[blocks]\ncpu = false\nmemory = false\ndisk = true\ndocker = false\n")
     monkeypatch.setattr("bot.blocks.docker.DockerManager", Mock(side_effect=AssertionError))
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
 
     handlers = app.app.handlers[0]
     commands = {
@@ -66,8 +74,7 @@ async def test_status_and_alerts_work_with_all_blocks_disabled(tmp_path):
     path = tmp_path / "blocks.toml"
     names = ("cpu", "memory", "disk", "network", "top", "temp", "uptime", "services", "docker")
     path.write_text("[blocks]\n" + "".join(f"{name} = false\n" for name in names))
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
 
     assert app.blocks == ()
     assert app.health_monitor is None
@@ -93,8 +100,7 @@ async def test_status_uses_shared_format_and_isolates_an_unavailable_block(tmp_p
             )
         ),
     )
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
     handlers = app.app.handlers[0]
     basic = next(
         handler.callback.__self__
@@ -123,8 +129,7 @@ async def test_status_command_and_button_show_compact_block_sections(tmp_path, m
     monkeypatch.setattr(
         "bot.blocks.network.NetworkBlock.summary", lambda self: "1 interface (eth_0)"
     )
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
     handlers = app.app.handlers[0]
     command = next(
         handler.callback
@@ -167,8 +172,7 @@ async def test_status_command_and_button_show_compact_block_sections(tmp_path, m
 async def test_status_back_opens_menu_if_acknowledgement_times_out(tmp_path):
     path = tmp_path / "blocks.toml"
     path.write_text("[blocks]\n")
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
     callback = next(
         handler.callback for handler in app.app.handlers[0] if isinstance(handler, CallbackQueryHandler)
     )
@@ -197,11 +201,10 @@ async def test_docker_can_be_enabled_independently(tmp_path, monkeypatch):
     manager = Mock()
     factory = Mock(return_value=manager)
     monkeypatch.setattr("bot.blocks.docker.DockerManager", factory)
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
 
     factory.assert_called_once()
-    manager.is_available.assert_not_called()
+    manager.is_available.assert_called_once()
     handlers = app.app.handlers[0]
     assert any(
         "docker" in handler.commands for handler in handlers if isinstance(handler, CommandHandler)
@@ -219,8 +222,7 @@ async def test_docker_page_routes_through_the_registered_submenu(tmp_path, monke
     manager.is_available.return_value = True
     manager.get_containers_page.return_value = ([], 0, 0)
     monkeypatch.setattr("bot.blocks.docker.DockerManager", Mock(return_value=manager))
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
     callback = next(
         handler.callback for handler in app.app.handlers[0] if isinstance(handler, CallbackQueryHandler)
     )
@@ -240,8 +242,7 @@ async def test_block_command_and_callback_present_chart(tmp_path, monkeypatch):
     path.write_text("[blocks]\ncpu = true\n")
     view = BlockView("CPU chart", photo=BytesIO(b"chart"), chart_caption="Caption")
     monkeypatch.setattr("bot.blocks.cpu.CpuBlock.render", lambda self: view)
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
     command = next(
         handler.callback for handler in app.app.handlers[0]
         if isinstance(handler, CommandHandler) and "cpu" in handler.commands
@@ -279,8 +280,7 @@ async def test_enabled_block_sends_threshold_alert_once_during_cooldown(tmp_path
         "bot.services.SystemMonitor.get_disk_metrics",
         Mock(return_value=DiskMetrics(total=100, used=100, free=0, percent=100)),
     )
-    app = BotApplication(path)
-    await app.initialize()
+    app = await initialize_app(path)
     monitor = app.health_monitor
     send_message = AsyncMock()
     monitor.bot_app = Mock(bot=Mock(send_message=send_message))
@@ -326,12 +326,22 @@ class ExampleBlock(Block):
         await self.show_view(query, self.view(f"Details {value}"))
 """
     )
+    (tmp_path / f"{module_name}.plugin.toml").write_text(
+        f'''[plugin]
+id = "{module_name}"
+name = "Example"
+description = "Example status"
+icon = "📌"
+version = "1.0.0"
+entry_point = "bot.blocks.{module_name}:ExampleBlock"
+extra_actions = ["{module_name}_details"]
+'''
+    )
     monkeypatch.setattr(bot.blocks, "__path__", [*bot.blocks.__path__, str(tmp_path)])
     path = tmp_path / "blocks.toml"
     path.write_text(f"[blocks]\n{module_name} = true\n")
-    app = BotApplication(path)
     try:
-        await app.initialize()
+        app = await initialize_app(path)
     finally:
         sys.modules.pop(f"bot.blocks.{module_name}", None)
 
@@ -363,17 +373,20 @@ def test_working_config_is_seeded_and_updated_without_replacing_values(tmp_path)
     template = tmp_path / "blocks.toml.example"
     template.write_text("[blocks]\ncpu = true\n")
     path = tmp_path / "config" / "blocks.toml"
-    assert select_blocks(path, ("cpu", "disk"), template) == ("cpu",)
+    config = PluginConfig(path, template)
+    assert config.sync({"cpu": False, "disk": False}) == {"cpu": True, "disk": False}
     assert path.read_text() == "[blocks]\ncpu = true\ndisk = false\n"
 
     original = "[blocks]\n# Only disk on this server\ndisk = true\ncpu = false"
     path.write_text(original)
-    assert select_blocks(path, ("cpu", "disk", "example"), template) == ("disk",)
+    assert config.sync({"cpu": False, "disk": False, "example": False}) == {
+        "disk": True, "cpu": False, "example": False
+    }
     assert path.read_text() == original + "\nexample = false\n"
 
     path.write_text("[blocks]\ncpu = invalid\n")
     with pytest.raises(ValueError):
-        select_blocks(path, ("cpu", "disk", "example"), template)
+        config.sync({"cpu": False, "disk": False, "example": False})
     assert path.read_text() == "[blocks]\ncpu = invalid\n"
 
 
@@ -392,5 +405,5 @@ def test_removed_crowdsec_switch_is_preserved_and_ignored(tmp_path):
     path = tmp_path / "blocks.toml"
     original = "[blocks]\ncpu = true\ncrowdsec = true\n"
     path.write_text(original)
-    assert select_blocks(path, ("cpu",)) == ("cpu",)
+    assert PluginConfig(path).sync({"cpu": False}) == {"cpu": True, "crowdsec": True}
     assert path.read_text() == original

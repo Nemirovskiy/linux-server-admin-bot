@@ -90,6 +90,10 @@ class Block(ABC):
         """Return an actionable error for a missing external dependency."""
         return None
 
+    @property
+    def last_dependency_issue(self) -> str | None:
+        return self._last_dependency_issue
+
     def poll_alert(self) -> Alert | None:
         issue = self.dependency_issue()
         if issue != self._last_dependency_issue:

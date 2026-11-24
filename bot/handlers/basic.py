@@ -6,20 +6,12 @@ from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.api import Block
+from bot.commands import CORE_COMMANDS
 from bot.services import AlertManager
 from bot.utils import escape_markdown, get_main_menu_keyboard, standard_handler
 from config import COMMANDS, EMOJI, get_logger
 
 logger = get_logger(__name__)
-
-CORE_COMMANDS = {
-    "start": "Main menu",
-    "status": "System status",
-    "alerts": "Alert configuration",
-    "help": "Help",
-    "author": "Bot author",
-}
-
 
 class BasicHandlers:
     def __init__(self, alert_manager: AlertManager, blocks: Sequence[Block]) -> None:
