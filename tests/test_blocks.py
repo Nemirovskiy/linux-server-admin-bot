@@ -1,9 +1,10 @@
+from io import BytesIO
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from telegram.ext import CallbackQueryHandler, CommandHandler
 
-from bot.blocks import select_blocks
+from bot.blocks import BlockView, select_blocks
 from bot.models import CPUMetrics, DiskMetrics, MemoryMetrics
 from config import settings
 from main import BotApplication
@@ -181,6 +182,89 @@ async def test_docker_can_be_enabled_independently(tmp_path, monkeypatch):
         handler.callback for handler in handlers if isinstance(handler, CallbackQueryHandler)
     )
     assert "docker_detail" in callback.__self__.block_actions
+
+
+async def test_docker_page_routes_through_the_registered_submenu(tmp_path, monkeypatch):
+    path = tmp_path / "blocks.toml"
+    path.write_text("[blocks]\ndocker = true\n")
+    manager = Mock()
+    manager.is_available.return_value = True
+    manager.get_containers_page.return_value = ([], 0, 0)
+    monkeypatch.setattr("bot.blocks.docker.DockerManager", Mock(return_value=manager))
+    app = BotApplication(path)
+    await app.initialize()
+    callback = next(
+        handler.callback for handler in app.app.handlers[0] if isinstance(handler, CallbackQueryHandler)
+    )
+    query = Mock(
+        data="docker_page|2", answer=AsyncMock(), edit_message_text=AsyncMock(), message=Mock(photo=())
+    )
+    update = Mock(callback_query=query, effective_user=Mock(id=settings.allowed_user_ids[0]))
+
+    await callback(update, Mock())
+
+    manager.get_containers_page.assert_called_once_with(page=2, per_page=10)
+    assert "No containers found" in query.edit_message_text.await_args.args[0]
+
+
+async def test_block_command_and_callback_present_chart(tmp_path, monkeypatch):
+    path = tmp_path / "blocks.toml"
+    path.write_text("[blocks]\ncpu = true\n")
+    view = BlockView("CPU chart", photo=BytesIO(b"chart"), chart_caption="Caption")
+    monkeypatch.setattr("bot.blocks.cpu.CpuBlock.render", lambda self: view)
+    app = BotApplication(path)
+    await app.initialize()
+    command = next(
+        handler.callback for handler in app.app.handlers[0]
+        if isinstance(handler, CommandHandler) and "cpu" in handler.commands
+    )
+    callback = next(
+        handler.callback for handler in app.app.handlers[0] if isinstance(handler, CallbackQueryHandler)
+    )
+    message = Mock(reply_text=AsyncMock(), reply_photo=AsyncMock(), delete=AsyncMock())
+    query = Mock(data="cmd_cpu", answer=AsyncMock(), message=message)
+    update = Mock(
+        callback_query=query, message=message, effective_message=message, effective_chat=None,
+        effective_user=Mock(id=settings.allowed_user_ids[0]),
+    )
+
+    await command(update, Mock())
+
+    message.reply_text.assert_awaited_once_with(
+        view.text, parse_mode="MarkdownV2", reply_markup=view.keyboard
+    )
+    message.reply_photo.assert_awaited_once_with(photo=view.photo, caption=view.chart_caption)
+    message.reply_photo.reset_mock()
+
+    await callback(update, Mock())
+
+    message.reply_photo.assert_awaited_once_with(
+        photo=view.photo, caption=view.text, parse_mode="MarkdownV2", reply_markup=view.keyboard
+    )
+    message.delete.assert_awaited_once()
+
+
+async def test_enabled_block_sends_threshold_alert_once_during_cooldown(tmp_path, monkeypatch):
+    path = tmp_path / "blocks.toml"
+    path.write_text("[blocks]\ndisk = true\n")
+    monkeypatch.setattr(
+        "bot.services.SystemMonitor.get_disk_metrics",
+        Mock(return_value=DiskMetrics(total=100, used=100, free=0, percent=100)),
+    )
+    app = BotApplication(path)
+    await app.initialize()
+    monitor = app.health_monitor
+    send_message = AsyncMock()
+    monitor.bot_app = Mock(bot=Mock(send_message=send_message))
+    monitor.register_alert_chat(123)
+
+    await monitor.check_system_health()
+    await monitor.check_system_health()
+
+    send_message.assert_awaited_once()
+    assert send_message.await_args.kwargs["chat_id"] == 123
+    assert send_message.await_args.kwargs["parse_mode"] == "MarkdownV2"
+    assert r"Current: 100\.0%" in send_message.await_args.kwargs["text"]
 
 
 async def test_new_file_is_discovered_and_adds_its_nested_button(tmp_path, monkeypatch):
