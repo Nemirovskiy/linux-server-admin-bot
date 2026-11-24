@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from bot.blocks import Block
+from bot.api import Block
 from bot.services import AlertManager
 from bot.utils import escape_markdown, get_main_menu_keyboard, standard_handler
 from config import COMMANDS, EMOJI, get_logger
@@ -52,8 +52,8 @@ class BasicHandlers:
         )
         for block, section in zip(self.blocks, sections, strict=True):
             if isinstance(section, BaseException):
-                logger.warning("Could not read block %s: %s", block.name, section)
-                section = f"{block.icon} *{escape_markdown(block.title)}:* Unavailable"
+                logger.warning("Could not read block %s: %s", block.metadata.id, section)
+                section = f"{block.metadata.icon} *{escape_markdown(block.metadata.name)}:* Unavailable"
             lines.append(section)
         if not self.blocks:
             lines.append("No information blocks enabled\\.")
@@ -68,7 +68,7 @@ class BasicHandlers:
         for command in CORE_COMMANDS:
             lines.append(f"`/{command}` \\- {escape_markdown(COMMANDS[f'/{command}'])}")
         for block in self.blocks:
-            lines.append(f"`/{block.name}` \\- {escape_markdown(block.description)}")
+            lines.append(f"`/{block.metadata.id}` \\- {escape_markdown(block.metadata.description)}")
         return "\n".join(lines)
 
     @standard_handler
@@ -78,7 +78,7 @@ class BasicHandlers:
     async def alerts_text(self) -> str:
         lines = [f"{EMOJI['alert']} *Alert Configuration*", ""]
         thresholds = [
-            f"• {escape_markdown(block.title)}: {block.alert_threshold}%"
+            f"• {escape_markdown(block.metadata.name)}: {block.alert_threshold}%"
             for block in self.blocks
             if block.alert_threshold is not None
         ]

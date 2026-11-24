@@ -2,7 +2,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.blocks.base import safe_delete_message
+from bot.api.block import safe_delete_message
 from bot.handlers.basic import BasicHandlers
 from bot.utils import get_back_to_main_keyboard
 from config import get_logger, settings
@@ -17,7 +17,7 @@ class CallbackHandlers:
         self.block_actions = {
             action: block.callback
             for block in basic.blocks
-            for action in (f"cmd_{block.name}", *block.extra_actions)
+            for action in (f"cmd_{block.metadata.id}", *block.extra_actions)
         }
         self.core_actions = {
             "cmd_status": basic.status_text,

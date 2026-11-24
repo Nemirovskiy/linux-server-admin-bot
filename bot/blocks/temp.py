@@ -1,23 +1,28 @@
 """System temperature block."""
 
-from bot.blocks.base import Block, BlockView
-from bot.utils import escape_markdown
-from config import EMOJI
+from bot.api import Block, BlockView, PluginMetadata
+from bot.api.presentation import (
+    EMOJI,
+    escape_markdown,
+)
 
 
 class TempBlock(Block):
-    name = "temp"
-    title = "Temperature"
-    icon = EMOJI["temp"]
-    description = "System temperature"
+    metadata = PluginMetadata(
+        id="temp",
+        name="Temperature",
+        description="System temperature",
+        version="1.0.0",
+        icon=EMOJI["temp"],
+    )
 
     def summary(self) -> str:
-        temperatures = self.monitor.get_temperature() or {}
+        temperatures = self.context.system.get_temperature() or {}
         readings = [sensor.current for sensors in temperatures.values() for sensor in sensors]
         return f"{max(readings):.1f}°C (highest)" if readings else "Unavailable"
 
     def render(self) -> BlockView:
-        temps = self.monitor.get_temperature()
+        temps = self.context.system.get_temperature()
         if not temps:
             return self.view(
                 f"{EMOJI['warning']} No temperature sensors found\\.\n\n"

@@ -1,21 +1,27 @@
 """System uptime block."""
 
-from bot.blocks.base import Block, BlockView
-from bot.utils import escape_markdown, format_duration
-from config import EMOJI
+from bot.api import Block, BlockView, PluginMetadata
+from bot.api.presentation import (
+    EMOJI,
+    escape_markdown,
+    format_duration,
+)
 
 
 class UptimeBlock(Block):
-    name = "uptime"
-    title = "Uptime"
-    icon = EMOJI["clock"]
-    description = "System uptime"
+    metadata = PluginMetadata(
+        id="uptime",
+        name="Uptime",
+        description="System uptime",
+        version="1.0.0",
+        icon=EMOJI["clock"],
+    )
 
     def summary(self) -> str:
-        return format_duration(self.monitor.get_uptime_info()["uptime_seconds"])
+        return format_duration(self.context.system.get_uptime_info()["uptime_seconds"])
 
     def render(self) -> BlockView:
-        info = self.monitor.get_uptime_info()
+        info = self.context.system.get_uptime_info()
 
         boot_time_str = info["boot_time"].strftime("%d/%m/%Y %H:%M:%S")
 

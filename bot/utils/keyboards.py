@@ -5,18 +5,21 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import EMOJI
 
 if TYPE_CHECKING:
-    from bot.blocks import Block
+    from bot.api import Block
 
 
 def get_main_menu_keyboard(blocks: Sequence[Block]) -> InlineKeyboardMarkup:
     """Show permanent actions and buttons for the enabled information blocks."""
     buttons = [
-        InlineKeyboardButton(f"{block.icon} {block.title}", callback_data=f"cmd_{block.name}")
+        InlineKeyboardButton(
+            f"{block.metadata.icon} {block.metadata.name}", callback_data=f"cmd_{block.metadata.id}"
+        )
         for block in blocks
     ]
     keyboard = [

@@ -1,37 +1,42 @@
 """Disk usage block."""
 
-from bot.blocks.base import Block, BlockView
-from bot.models import Alert, DiskMetrics
-from bot.utils import escape_markdown
-from bot.utils.formatters import _create_progress_bar, _get_status_indicator, format_usage_line
-from config import EMOJI
+from bot.api import Alert, Block, BlockView, DiskMetrics, PluginMetadata
+from bot.api.presentation import (
+    EMOJI,
+    create_progress_bar,
+    escape_markdown,
+    format_usage_line,
+    get_status_indicator,
+)
 
 
 class DiskBlock(Block):
-    name = "disk"
-    title = "Disk"
-    icon = EMOJI["disk"]
-    description = "Disk usage"
-
-    sends_alerts = True
+    metadata = PluginMetadata(
+        id="disk",
+        name="Disk",
+        description="Disk usage",
+        version="1.0.0",
+        icon=EMOJI["disk"],
+        sends_alerts=True,
+    )
 
     @property
     def alert_threshold(self) -> int:
-        return self.alerts.disk_threshold
+        return self.context.alerts.disk_threshold
 
     def check_alert(self) -> Alert | None:
-        return self.alerts.check_disk_alert(self.monitor.get_disk_metrics())
+        return self.context.alerts.check_disk_alert(self.context.system.get_disk_metrics())
 
     def summary(self) -> str:
-        return f"{self.monitor.get_disk_metrics().percent:.1f}%"
+        return f"{self.context.system.get_disk_metrics().percent:.1f}%"
 
     def status_section(self) -> str:
-        metrics = self.monitor.get_disk_metrics()
+        metrics = self.context.system.get_disk_metrics()
         size = escape_markdown(f"{metrics.used_gb:.1f}GB / {metrics.total_gb:.1f}GB")
-        return f"{self.icon} *{self.title}*\n{format_usage_line(metrics.percent, 75, 90)}\n└ {size}"
+        return f"{self.metadata.icon} *{self.metadata.name}*\n{format_usage_line(metrics.percent, 75, 90)}\n└ {size}"
 
     def render(self) -> BlockView:
-        return self.view(format_all_disk_metrics(self.monitor.get_all_disk_metrics()))
+        return self.view(format_all_disk_metrics(self.context.system.get_all_disk_metrics()))
 
 
 def _format_disk_size(size_bytes: int) -> str:
@@ -58,8 +63,8 @@ def format_all_disk_metrics(disks: list[DiskMetrics]) -> str:
     message = ""
 
     for disk in disks:
-        status_indicator = _get_status_indicator(disk.percent, 75, 90)
-        bar = _create_progress_bar(disk.percent, 100, length=10)
+        status_indicator = get_status_indicator(disk.percent, 75, 90)
+        bar = create_progress_bar(disk.percent, 100, length=10)
 
         # Format mount point with filesystem type
         mount = escape_markdown(disk.mount_point)

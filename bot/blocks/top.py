@@ -1,29 +1,34 @@
 """Top processes block."""
 
-from bot.blocks.base import Block, BlockView
-from bot.models import ProcessInfo
-from bot.utils import chart_generator, escape_markdown
-from bot.utils.formatters import _get_status_indicator
-from config import EMOJI
-from config.constants import MAX_PROCESS_COUNT
+from bot.api import Block, BlockView, PluginMetadata, ProcessInfo
+from bot.api.presentation import (
+    EMOJI,
+    MAX_PROCESS_COUNT,
+    chart_generator,
+    escape_markdown,
+    get_status_indicator,
+)
 
 
 class TopBlock(Block):
-    name = "top"
-    title = "Processes"
-    icon = EMOJI["process"]
-    description = "Top processes"
+    metadata = PluginMetadata(
+        id="top",
+        name="Processes",
+        description="Top processes",
+        version="1.0.0",
+        icon=EMOJI["process"],
+    )
     combine_photo = True
 
     def summary(self) -> str:
-        processes = self.monitor.get_top_processes(limit=1)
+        processes = self.context.system.get_top_processes(limit=1)
         if not processes:
             return "No processes found"
         process = processes[0]
         return f"{process.name} ({process.cpu_percent:.1f}% CPU)"
 
     def render(self) -> BlockView:
-        processes = self.monitor.get_top_processes(limit=MAX_PROCESS_COUNT)
+        processes = self.context.system.get_top_processes(limit=MAX_PROCESS_COUNT)
         if not processes:
             return self.view("No processes found\\.")
         photo = chart_generator.generate_process_chart(
@@ -49,7 +54,7 @@ def format_top_processes(processes: list[ProcessInfo]) -> str:
     message = ""
 
     for i, proc in enumerate(processes, 1):
-        cpu_indicator = _get_status_indicator(proc.cpu_percent)
+        cpu_indicator = get_status_indicator(proc.cpu_percent)
         message += (
             f"*{i}\\. {escape_markdown(proc.name[:20])}* · "
             f"{cpu_indicator} CPU: {escape_markdown(f'{proc.cpu_percent:.1f}%')} │ "

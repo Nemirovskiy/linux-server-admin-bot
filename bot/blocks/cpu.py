@@ -1,40 +1,46 @@
 """CPU information block."""
 
-from bot.blocks.base import Block, BlockView
-from bot.models import Alert, CPUMetrics
-from bot.utils import chart_generator, escape_markdown
-from bot.utils.formatters import _create_progress_bar, _get_status_indicator, format_usage_line
-from config import EMOJI
+from bot.api import Alert, Block, BlockView, CPUMetrics, PluginMetadata
+from bot.api.presentation import (
+    EMOJI,
+    chart_generator,
+    create_progress_bar,
+    escape_markdown,
+    format_usage_line,
+    get_status_indicator,
+)
 
 
 class CpuBlock(Block):
-    name = "cpu"
-    title = "CPU"
-    icon = EMOJI["cpu"]
-    description = "CPU information"
-
-    sends_alerts = True
+    metadata = PluginMetadata(
+        id="cpu",
+        name="CPU",
+        description="CPU information",
+        version="1.0.0",
+        icon=EMOJI["cpu"],
+        sends_alerts=True,
+    )
 
     @property
     def alert_threshold(self) -> int:
-        return self.alerts.cpu_threshold
+        return self.context.alerts.cpu_threshold
 
     def check_alert(self) -> Alert | None:
-        return self.alerts.check_cpu_alert(self.monitor.get_cpu_metrics(interval=0.5))
+        return self.context.alerts.check_cpu_alert(self.context.system.get_cpu_metrics(interval=0.5))
 
     def summary(self) -> str:
-        return f"{self.monitor.get_cpu_metrics(interval=0.5).percent:.1f}%"
+        return f"{self.context.system.get_cpu_metrics(interval=0.5).percent:.1f}%"
 
     def status_section(self) -> str:
-        metrics = self.monitor.get_cpu_metrics(interval=0.5)
+        metrics = self.context.system.get_cpu_metrics(interval=0.5)
         return (
-            f"{self.icon} *{self.title}*\n"
+            f"{self.metadata.icon} *{self.metadata.name}*\n"
             f"{format_usage_line(metrics.percent)}\n"
             f"└ Cores: {escape_markdown(str(metrics.count))}"
         )
 
     def render(self) -> BlockView:
-        metrics = self.monitor.get_cpu_metrics()
+        metrics = self.context.system.get_cpu_metrics()
         return self.view(
             format_cpu_metrics(metrics),
             photo=chart_generator.generate_cpu_chart(metrics.percent, metrics.per_cpu),
@@ -52,8 +58,8 @@ def format_cpu_metrics(metrics: CPUMetrics) -> str:
     Returns:
         Formatted message in MarkdownV2
     """
-    status_indicator = _get_status_indicator(metrics.percent)
-    overall_bar = _create_progress_bar(metrics.percent, 100, 12)
+    status_indicator = get_status_indicator(metrics.percent)
+    overall_bar = create_progress_bar(metrics.percent, 100, 12)
 
     message = ""
     message += "*Overall Usage*\n"
@@ -72,8 +78,8 @@ def format_cpu_metrics(metrics: CPUMetrics) -> str:
     message += "\n*Per\\-Core Usage*\n\n"
 
     for i, usage in enumerate(metrics.per_cpu):
-        bar = _create_progress_bar(usage, 100, length=8)
-        indicator = _get_status_indicator(usage)
+        bar = create_progress_bar(usage, 100, length=8)
+        indicator = get_status_indicator(usage)
         message += (
             f"CPU{i}: {escape_markdown(bar)} {escape_markdown(f'{usage:.1f}%')} {indicator}\n"
         )

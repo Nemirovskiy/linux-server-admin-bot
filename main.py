@@ -39,13 +39,16 @@ import argparse
 import asyncio
 import signal
 import sys
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Optional
 
 from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
-from bot.blocks import Block, discover_blocks, select_blocks
+from bot.api import Block, NullBroker, PluginContext
+from bot.blocks import Block as LegacyBlock
+from bot.blocks import discover_blocks, select_blocks
 from bot.handlers import BasicHandlers, CallbackHandlers
 from bot.handlers.basic import CORE_COMMANDS
 from bot.monitors import HealthMonitor
@@ -63,6 +66,7 @@ class BotApplication:
         self.app: Optional[Application] = None
         self.blocks: tuple[Block, ...] = ()
         self.health_monitor: Optional[HealthMonitor] = None
+        self._shutdown = AsyncExitStack()
 
     async def initialize(self, check_only: bool = False) -> None:
         providers = discover_blocks(CORE_COMMANDS)
@@ -81,14 +85,21 @@ class BotApplication:
             disk_threshold=settings.disk_alert_threshold,
             cooldown_seconds=settings.alert_cooldown,
         )
-        self.blocks = tuple(providers[name](monitor, alerts) for name in enabled)
+        broker = NullBroker()
+        blocks = []
+        for name in enabled:
+            provider = providers[name]
+            context = PluginContext(name, {}, get_logger(provider.__module__), monitor, alerts, broker)
+            block = provider._from_context(context) if issubclass(provider, LegacyBlock) else provider(context)
+            blocks.append(block)
+        self.blocks = tuple(blocks)
         if check_only:
             print(f"Enabled blocks: {', '.join(enabled) or 'none'}")
             issues = []
             for block in self.blocks:
                 issue = block.dependency_issue()
                 if issue:
-                    issues.append(f"{block.name}: {issue}")
+                    issues.append(f"{block.metadata.id}: {issue}")
             if issues:
                 raise ValueError("\n".join(issues))
             return
@@ -105,10 +116,10 @@ class BotApplication:
         for command in CORE_COMMANDS:
             self.app.add_handler(CommandHandler(command, getattr(basic, f"{command}_command")))
         for block in self.blocks:
-            self.app.add_handler(CommandHandler(block.name, block.command))
+            self.app.add_handler(CommandHandler(block.metadata.id, block.command))
         self.app.add_handler(CallbackQueryHandler(callbacks.handle_callback))
 
-        checks = [block.poll_alert for block in self.blocks if block.sends_alerts]
+        checks = [block.poll_alert for block in self.blocks if block.metadata.sends_alerts]
         if checks:
             self.health_monitor = HealthMonitor(checks, self.app)
 
@@ -121,20 +132,33 @@ class BotApplication:
 
         logger.info("Starting bot application...")
 
-        await self.app.initialize()
-        await self.app.start()
-        await self._set_bot_commands()
-        await self.app.updater.start_polling(drop_pending_updates=True)
+        async with AsyncExitStack() as shutdown:
+            await self.app.initialize()
+            shutdown.push_async_callback(self.app.shutdown)
+            await self.app.start()
+            shutdown.push_async_callback(self.app.stop)
 
-        if self.health_monitor:
-            self.health_monitor.start()
+            for block in self.blocks:
+                shutdown.push_async_callback(block.stop)
+                await block.setup()
+            for block in self.blocks:
+                await block.start()
+
+            await self._set_bot_commands()
+            await self.app.updater.start_polling(drop_pending_updates=True)
+            shutdown.push_async_callback(self.app.updater.stop)
+            if self.health_monitor:
+                self.health_monitor.start()
+                shutdown.callback(self.health_monitor.stop)
+
+            self._shutdown = shutdown.pop_all()
 
         logger.info("Bot is running! Press Ctrl+C to stop.")
 
     async def _set_bot_commands(self) -> None:
         """Set the bot commands menu visible in Telegram."""
         commands = [BotCommand(name, description) for name, description in CORE_COMMANDS.items()]
-        commands.extend(BotCommand(block.name, block.description) for block in self.blocks)
+        commands.extend(BotCommand(block.metadata.id, block.metadata.description) for block in self.blocks)
 
         await self.app.bot.set_my_commands(commands)
         logger.info("Bot commands menu configured")
@@ -143,16 +167,7 @@ class BotApplication:
         """Stop the bot application gracefully."""
         logger.info("Stopping bot application...")
 
-        # Stop health monitor
-        if self.health_monitor:
-            self.health_monitor.stop()
-
-        # Stop bot
-        if self.app:
-            await self.app.updater.stop()
-            await self.app.stop()
-            await self.app.shutdown()
-
+        await self._shutdown.aclose()
         logger.info("Bot application stopped")
 
     async def run(self) -> None:
@@ -172,11 +187,10 @@ class BotApplication:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        # Wait for stop event
-        await stop_event.wait()
-
-        # Cleanup
-        await self.stop()
+        try:
+            await stop_event.wait()
+        finally:
+            await self.stop()
 
 
 async def main() -> None:

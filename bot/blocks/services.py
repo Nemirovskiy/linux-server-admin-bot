@@ -1,25 +1,30 @@
 """System services block."""
 
-from bot.blocks.base import Block, BlockView
-from bot.utils import escape_markdown
-from config import EMOJI
+from bot.api import Block, BlockView, PluginMetadata
+from bot.api.presentation import (
+    EMOJI,
+    escape_markdown,
+)
 
 
 class ServicesBlock(Block):
-    name = "services"
-    title = "Services"
-    icon = EMOJI["services"]
-    description = "System services"
+    metadata = PluginMetadata(
+        id="services",
+        name="Services",
+        description="System services",
+        version="1.0.0",
+        icon=EMOJI["services"],
+    )
 
     def summary(self) -> str:
-        services = self.monitor.get_services_status()
+        services = self.context.system.get_services_status()
         if not services:
             return "Unavailable"
         running = sum(service["is_running"] for service in services)
         return f"{running} active / {len(services)} checked"
 
     def render(self) -> BlockView:
-        services = self.monitor.get_services_status()
+        services = self.context.system.get_services_status()
         if not services:
             return self.view(
                 f"{EMOJI['warning']} No systemd services found\\.\n\n"

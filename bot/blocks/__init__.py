@@ -11,12 +11,14 @@ from collections.abc import Iterable
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from bot.api import Block as PublicBlock
+from bot.api import PluginDefinitionError, PluginMetadata
 from bot.blocks.base import Block, BlockView
 
 __all__ = ["Block", "BlockView", "discover_blocks", "select_blocks"]
 
 
-def discover_blocks(reserved_commands: Iterable[str]) -> dict[str, type[Block]]:
+def discover_blocks(reserved_commands: Iterable[str]) -> dict[str, type[PublicBlock]]:
     """Load each public block module shipped in this package."""
     blocks = {}
     reserved = set(reserved_commands)
@@ -27,39 +29,44 @@ def discover_blocks(reserved_commands: Iterable[str]) -> dict[str, type[Block]]:
         try:
             module = importlib.import_module(f".{module_info.name}", __name__)
         except Exception as exc:
-            raise ValueError(f"Could not load block file {module_info.name}.py: {exc}") from exc
+            raise PluginDefinitionError(
+                f"Could not load block file {module_info.name}.py: {exc}"
+            ) from exc
         providers = [
             provider
             for provider in vars(module).values()
             if inspect.isclass(provider)
             and provider.__module__ == module.__name__
-            and issubclass(provider, Block)
+            and issubclass(provider, PublicBlock)
             and not inspect.isabstract(provider)
         ]
         if len(providers) != 1:
-            raise ValueError(f"{module_info.name}.py must define exactly one concrete Block")
+            raise PluginDefinitionError(f"{module_info.name}.py must define exactly one concrete Block")
 
         provider = providers[0]
-        name = getattr(provider, "name", "")
+        metadata = getattr(provider, "metadata", None)
+        if not isinstance(metadata, PluginMetadata):
+            raise PluginDefinitionError(f"{module_info.name}.py must define PluginMetadata")
+        name = metadata.id
         if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", name):
-            raise ValueError(f"Invalid command name in {module_info.name}.py")
+            raise PluginDefinitionError(f"Invalid command name in {module_info.name}.py")
         if name in blocks or name in reserved:
-            raise ValueError(f"Duplicate or reserved block name: {name}")
-        for field in ("title", "icon", "description"):
-            value = getattr(provider, field, None)
+            raise PluginDefinitionError(f"Duplicate or reserved block name: {name}")
+        for field in ("name", "icon", "description"):
+            value = getattr(metadata, field)
             if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"Block '{name}' must define {field}")
-        if len(provider.description) > 256:
-            raise ValueError(f"Block '{name}' description exceeds 256 characters")
+                raise PluginDefinitionError(f"Block '{name}' must define metadata.{field}")
+        if len(metadata.description) > 256:
+            raise PluginDefinitionError(f"Block '{name}' description exceeds 256 characters")
         if any(not action.startswith(f"{name}_") for action in provider.extra_actions):
-            raise ValueError(f"Nested actions for '{name}' must start with '{name}_'")
+            raise PluginDefinitionError(f"Nested actions for '{name}' must start with '{name}_'")
         blocks[name] = provider
 
     actions = set()
     for name, provider in blocks.items():
         for action in (f"cmd_{name}", *provider.extra_actions):
             if action in actions or action in reserved_actions:
-                raise ValueError(f"Duplicate or reserved block action: {action}")
+                raise PluginDefinitionError(f"Duplicate or reserved block action: {action}")
             actions.add(action)
     return blocks
 

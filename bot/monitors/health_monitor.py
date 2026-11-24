@@ -9,9 +9,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from telegram.ext import Application
 
-from bot.models import Alert
+from bot.api import Alert, AlertType
 from bot.utils import escape_markdown
-from config import AlertType, EMOJI, get_logger, settings
+from config import EMOJI, get_logger, settings
 
 logger = get_logger(__name__)
 

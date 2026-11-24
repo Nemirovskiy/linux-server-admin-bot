@@ -1,14 +1,20 @@
 """
 System monitoring service using psutil.
 """
+from __future__ import annotations
+
 import os
+from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import psutil
 
 from bot.models import CPUMetrics, DiskMetrics, MemoryMetrics, NetworkMetrics, ProcessInfo, SystemStatus
 from config import get_logger
+
+if TYPE_CHECKING:
+    from bot.api.protocols import ServiceStatus, TemperatureReading, UptimeInfo
 
 logger = get_logger(__name__)
 
@@ -255,7 +261,7 @@ class SystemMonitor:
             logger.error(f"Error getting system status: {e}")
             raise
 
-    def get_temperature(self) -> Optional[dict]:
+    def get_temperature(self) -> Mapping[str, Sequence[TemperatureReading]] | None:
         """
         Get system temperature sensors (if available).
 
@@ -271,7 +277,7 @@ class SystemMonitor:
             logger.warning(f"Temperature sensors not available: {e}")
             return None
 
-    def get_uptime_info(self) -> dict:
+    def get_uptime_info(self) -> UptimeInfo:
         """
         Get detailed uptime information.
 
@@ -311,7 +317,7 @@ class SystemMonitor:
             logger.error(f"Error getting uptime info: {e}")
             raise
 
-    def get_services_status(self, services: Optional[List[str]] = None) -> List[dict]:
+    def get_services_status(self, services: list[str] | None = None) -> list[ServiceStatus]:
         """
         Get status of systemd services.
 
@@ -338,7 +344,7 @@ class SystemMonitor:
                 "fail2ban",
             ]
         
-        results = []
+        results: list[ServiceStatus] = []
         
         for service in services:
             try:
