@@ -81,6 +81,7 @@ fi
 
 echo "Installing Python dependencies in .venv"
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --no-deps -e .
 
 echo "Checking block configuration and dependencies"
 HOST_PROC_PATH=/proc HOST_SYS_PATH=/sys .venv/bin/python main.py --check-blocks
@@ -115,7 +116,7 @@ systemctl --user is-active --quiet "$service"
 
 echo "Bot service started. Open Telegram and send /start."
 echo "Logs: journalctl --user -u $service -f"
-echo "After editing blocks.toml: systemctl --user restart $service"
+echo "Manage blocks: $project_dir/.venv/bin/lsab plugins list"
 
 account=$(id -un)
 if [[ $(loginctl show-user "$account" --property=Linger --value 2>/dev/null || true) != yes ]]; then

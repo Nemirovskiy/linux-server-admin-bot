@@ -215,6 +215,14 @@ linux-server-admin-bot/
 | `RATE_LIMIT_PERIOD` | Rate limit period (seconds) | ❌ No | 60 |
 | `LOG_LEVEL` | Logging level | ❌ No | INFO |
 
+### Command-line management
+
+The native installer provides `.venv/bin/lsab`. Use `lsab plugins list` to
+inspect blocks and `lsab plugins configure` to edit switches interactively.
+Use `lsab plugins check` before applying changes. See the
+[CLI guide](docs/cli.md) for JSON output, status, systemd and Docker Compose
+control, and rollback.
+
 ### Information blocks
 
 The bot reads a local, Git-ignored `blocks.toml`. On first startup it copies
