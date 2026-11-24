@@ -38,7 +38,7 @@ def test_config_refuses_to_overwrite_simultaneous_manual_edit(tmp_path, monkeypa
     path = tmp_path / "blocks.toml"
     path.write_text("[blocks]\ncpu = false\n")
     manual = "[blocks]\ncpu = false # edited concurrently\n"
-    monkeypatch.setattr("bot.plugins.config.os.fsync", lambda _: path.write_text(manual))
+    monkeypatch.setattr("bot.storage.os.fsync", lambda _: path.write_text(manual))
 
     with pytest.raises(ValueError, match="changed during the update"):
         PluginConfig(path).set_enabled("cpu", True)

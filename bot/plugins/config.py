@@ -1,24 +1,33 @@
-"""Preserve the local blocks.toml and update it under an exclusive lock."""
+"""Read and atomically edit the local blocks.toml."""
 
 import fcntl
 import json
-import os
 import re
+import stat
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
-_SWITCH_LINE = re.compile(
-    r"^(?P<key>[ \t]*(?:blocks\.)?[a-zA-Z0-9_-]+[ \t]*=[ \t]*)"
-    r"(?P<value>true|false)(?=[ \t]*(?:#|\r?$))",
-    re.MULTILINE,
-)
-_TABLE = re.compile(r"^[ \t]*\[blocks\][ \t]*(?:#|\r?$)", re.MULTILINE)
+from bot.storage import atomic_write
+
+_BOOLEAN = re.compile(r"\b(?:true|false)\b")
 
 
 def _literal(enabled: bool) -> str:
     return "true" if enabled else "false"
+
+
+def _key(name: str) -> str:
+    return name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else json.dumps(name, ensure_ascii=False)
+
+
+@dataclass(frozen=True)
+class ConfigRevision:
+    original: str | None
+    text: str
+    switches: dict[str, bool]
 
 
 class PluginConfig:
@@ -37,108 +46,130 @@ class PluginConfig:
                 raise ValueError(f"Block '{name}' must be true or false")
         return switches
 
-    def load(self) -> dict[str, bool]:
+    def snapshot(self) -> str | None:
         try:
-            return self.validate(self.path.read_text(encoding="utf-8"))
+            return self.path.read_bytes().decode("utf-8")
         except FileNotFoundError:
-            return {}
+            return None
+
+    def load(self) -> dict[str, bool]:
+        original = self.snapshot()
+        return {} if original is None else self.validate(original)
 
     def is_enabled(self, plugin_id: str) -> bool:
         return self.load().get(plugin_id, False)
 
     def sync(self, defaults: Mapping[str, bool]) -> dict[str, bool]:
-        def update(values: dict[str, bool], creating: bool) -> None:
-            for name, enabled in defaults.items():
-                values.setdefault(name, enabled if creating else False)
-
-        return self._update(update)
+        return self.update_switches({}, defaults).switches
 
     def set_enabled(self, plugin_id: str, enabled: bool) -> None:
-        if not isinstance(enabled, bool):
-            raise TypeError("Plugin switch must be a boolean")
-        self._update(lambda values, _: values.__setitem__(plugin_id, enabled))
+        self.update_switches({plugin_id: enabled}, {})
 
-    def _update(self, edit: Callable[[dict[str, bool], bool], None]) -> dict[str, bool]:
+    def preview(self, defaults: Mapping[str, bool]) -> ConfigRevision:
+        return self._plan(self.snapshot(), {}, defaults)
+
+    def update_switches(
+        self,
+        updates: Mapping[str, bool],
+        defaults: Mapping[str, bool],
+        *,
+        preview: ConfigRevision | None = None,
+    ) -> ConfigRevision:
+        if any(not isinstance(enabled, bool) for enabled in updates.values()):
+            raise TypeError("Plugin switches must be booleans")
+        with self._lock():
+            original = self.snapshot()
+            if preview is not None and original != preview.original:
+                raise ValueError("Blocks configuration changed during the update. Retry.")
+            revision = self._plan(original, updates, defaults)
+            if revision.text != original:
+                self._replace(revision.text, original)
+            return revision
+
+    def replace(self, text: str, expected: str | None) -> None:
+        self.validate(text)
+        with self._lock():
+            self._replace(text, expected)
+
+    @contextmanager
+    def _lock(self) -> Iterator[None]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.with_name(".blocks-config.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                with self.path.open("r", encoding="utf-8", newline="") as stream:
-                    original = stream.read()
-                    mode = os.fstat(stream.fileno()).st_mode & 0o777
-            except FileNotFoundError:
-                original = None
-                mode = 0o600
+            yield
 
-            if original is not None:
-                text = original
-            elif self.template is not None:
-                with self.template.open("r", encoding="utf-8", newline="") as stream:
-                    text = stream.read()
-            else:
-                text = "[blocks]\n"
+    def _plan(
+        self, original: str | None, updates: Mapping[str, bool], defaults: Mapping[str, bool]
+    ) -> ConfigRevision:
+        text = original
+        if text is None:
+            text = self.template.read_bytes().decode("utf-8") if self.template else "[blocks]\n"
+        switches = self.validate(text)
+        for name in tuple(switches):
+            if name in updates and switches[name] != updates[name]:
+                switches[name] = updates[name]
+                text = self._replace_switch(text, switches, updates[name])
 
-            previous = self.validate(text)
-            switches = previous.copy()
-            edit(switches, original is None)
-            if previous != switches:
-                text = self._render(text, previous, switches)
-            if text != original:
-                self._replace(text, original, mode)
-            return switches
-
-    def _render(self, text: str, old: dict[str, bool], new: dict[str, bool]) -> str:
-        def replace(match: re.Match[str]) -> str:
-            name = match["key"].split("=")[0].strip().removeprefix("blocks.")
-            if name in old and old[name] != new[name]:
-                return match["key"] + _literal(new[name])
-            return match[0]
-
-        updated = _SWITCH_LINE.sub(replace, text)
-        newline = "\r\n" if "\r\n" in text else "\n"
-        prefix = "" if _TABLE.search(text) else "blocks."
-        additions = [
-            (
-                f"{prefix}{json.dumps(name, ensure_ascii=False)} = {_literal(new[name])}"
-                if not re.fullmatch(r"[A-Za-z0-9_-]+", name)
-                else f"{prefix}{name} = {_literal(new[name])}"
-            )
-            for name in new
-            if name not in old
-        ]
+        additions = {
+            name: enabled if original is None else False
+            for name, enabled in defaults.items()
+            if name not in switches
+        }
+        additions.update(
+            (name, enabled) for name, enabled in updates.items() if name not in switches
+        )
         if additions:
-            updated += (
-                ("" if updated.endswith("\n") else newline) + newline.join(additions) + newline
+            previous_count = len(switches)
+            switches.update(additions)
+            text = self._append_switches(
+                text, switches, additions, inline_comma=bool(previous_count)
             )
+        return ConfigRevision(original, text, switches)
+
+    def _matches(self, text: str, expected: dict[str, bool]) -> bool:
         try:
-            if self.validate(updated) == new:
-                return updated
+            return self.validate(text) == expected
         except ValueError:
-            pass
+            return False
 
-        # Legal inline tables and quoted switch names may require reformatting.
-        rows = [
-            f"{json.dumps(name, ensure_ascii=False)} = {_literal(enabled)}"
-            for name, enabled in new.items()
-        ]
-        return newline.join(("[blocks]", *rows, ""))
+    def _replace_switch(self, text: str, expected: dict[str, bool], enabled: bool) -> str:
+        for match in _BOOLEAN.finditer(text):
+            if match[0] == _literal(enabled):
+                continue
+            candidate = text[: match.start()] + _literal(enabled) + text[match.end() :]
+            if self._matches(candidate, expected):
+                return candidate
+        raise ValueError("Could not edit the block switch while preserving comments")
 
-    def _replace(self, text: str, original: str | None, mode: int) -> None:
-        with NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="", dir=self.path.parent, delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            try:
-                os.fchmod(stream.fileno(), mode)
-                stream.write(text)
-                stream.flush()
-                os.fsync(stream.fileno())
-                try:
-                    current = self.path.read_bytes().decode("utf-8")
-                except FileNotFoundError:
-                    current = None
-                if current != original:
-                    raise ValueError("Blocks configuration changed during the update. Retry.")
-                os.replace(temporary, self.path)
-            finally:
-                temporary.unlink(missing_ok=True)
+    def _append_switches(
+        self,
+        text: str,
+        expected: dict[str, bool],
+        additions: dict[str, bool],
+        *,
+        inline_comma: bool,
+    ) -> str:
+        newline = "\r\n" if "\r\n" in text else "\n"
+        separator = "" if text.endswith("\n") else newline
+        rows = [f"{_key(name)} = {_literal(enabled)}" for name, enabled in additions.items()]
+        for prefix in ("", "blocks."):
+            candidate = text + separator + newline.join(prefix + row for row in rows) + newline
+            if self._matches(candidate, expected):
+                return candidate
+        for match in reversed(tuple(re.finditer(r"}", text))):
+            insert = (", " if inline_comma else " ") + ", ".join(rows) + " "
+            candidate = text[: match.start()] + insert + text[match.start() :]
+            if self._matches(candidate, expected):
+                return candidate
+        raise ValueError("Could not append block switches while preserving comments")
+
+    def _replace(self, text: str, expected: str | None) -> None:
+        def check_revision() -> None:
+            if self.snapshot() != expected:
+                raise ValueError("Blocks configuration changed during the update. Retry.")
+
+        try:
+            mode = stat.S_IMODE(self.path.stat().st_mode) & 0o777
+        except FileNotFoundError:
+            mode = 0o600
+        atomic_write(self.path, text, mode, check_revision)
