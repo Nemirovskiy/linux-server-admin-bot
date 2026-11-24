@@ -2,16 +2,19 @@
 
 import asyncio
 from dataclasses import dataclass
+from logging import getLogger
 from typing import List, Optional
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.blocks.base import Block, BlockView
-from bot.services import AlertManager, SystemMonitor
-from bot.utils import escape_markdown, get_back_to_main_keyboard
-from config import EMOJI, get_logger
+from bot.api import Block, BlockView, PluginContext, PluginMetadata
+from bot.api.presentation import (
+    EMOJI,
+    escape_markdown,
+    get_back_to_main_keyboard,
+)
 
-logger = get_logger(__name__)
+logger = getLogger(__name__)
 
 # Try to import docker, handle if not installed
 try:
@@ -26,10 +29,13 @@ except ImportError:
 
 
 class DockerBlock(Block):
-    name = "docker"
-    title = "Docker"
-    icon = EMOJI["docker"]
-    description = "Docker containers"
+    metadata = PluginMetadata(
+        id="docker",
+        name="Docker",
+        description="Docker containers",
+        version="1.0.0",
+        icon=EMOJI["docker"],
+    )
     extra_actions = (
         "docker_list",
         "docker_page",
@@ -39,8 +45,8 @@ class DockerBlock(Block):
         "docker_restart",
     )
 
-    def __init__(self, monitor: SystemMonitor, alerts: AlertManager) -> None:
-        super().__init__(monitor, alerts)
+    def __init__(self, context: PluginContext) -> None:
+        super().__init__(context)
         self.docker_manager = DockerManager()
 
     def dependency_issue(self) -> str | None:
