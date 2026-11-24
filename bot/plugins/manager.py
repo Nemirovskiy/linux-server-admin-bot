@@ -48,16 +48,18 @@ class PluginManager:
         self._startup_ids: tuple[str, ...] = ()
         self.defaults: dict[str, bool] = {}
         self.switches: dict[str, bool] = {}
+        self.conflicts: list[PluginRecord] = []
         self.config_text: str | None = None
 
     def discover(self, *, sync: bool = True, configuration: str | None = None) -> None:
         if any(record.instance is not None for record in self.list_plugins()):
             raise RuntimeError("Stop the plugins before rediscovering")
         self.registry = PluginRegistry()
+        self.conflicts.clear()
         action_owners: dict[str, PluginRecord] = {}
-        for source in self.sources:
-            for item in source.discover():
-                self._register(item, action_owners)
+        items = (item for source in self.sources for item in source.discover())
+        for item in sorted(items, key=lambda item: item.source != "builtin"):
+            self._register(item, action_owners)
 
         self.defaults = {
             record.plugin_id: bool(record.descriptor and record.descriptor.default_enabled is True)
@@ -66,14 +68,24 @@ class PluginManager:
         if configuration is None:
             revision = (
                 self.config.update_switches({}, self.defaults)
-                if sync else self.config.preview(self.defaults)
+                if sync
+                else self.config.preview(self.defaults)
             )
             self.config_text, self.switches = revision.text, revision.switches
         else:
             self.config_text = configuration
             self.switches = self.config.validate(configuration)
-        for name in self.switches.keys() - self.defaults.keys():
+        for name in sorted(self.switches.keys() - self.defaults.keys()):
             logger.warning("Configured block '%s' is missing; keeping its setting", name)
+            self.registry.register(
+                PluginRecord(
+                    name,
+                    "missing",
+                    enabled=self.switches[name],
+                    health=PluginHealth.UNAVAILABLE,
+                    dependency_issue="Plugin package or built-in manifest is missing.",
+                )
+            )
         self._startup_ids = tuple(
             name for name, enabled in self.switches.items() if enabled and name in self.defaults
         )
@@ -84,31 +96,36 @@ class PluginManager:
         self, item: PluginDescriptor | DiscoveryFailure, action_owners: dict[str, PluginRecord]
     ) -> None:
         name = item.plugin_id if isinstance(item, DiscoveryFailure) else item.metadata.id
+        descriptor = item if isinstance(item, PluginDescriptor) else None
+        record = PluginRecord(name, item.source, descriptor, distribution=item.distribution)
         if self.registry.exists(name):
-            record = self.get_plugin(name)
-            self._fail(
-                record, "discovery", f"Duplicate plugin ID: {name} ({record.source}, {item.source})"
-            )
+            owner = self.get_plugin(name)
+            message = f"Duplicate plugin ID: {name} ({owner.source}, {item.source})"
+            if owner.source != "builtin" or record.source != "external":
+                self._fail(owner, "discovery", message)
+            self._fail(record, "discovery", message)
+            self.conflicts.append(record)
             return
-        record = PluginRecord(name, item.source)
         self.registry.register(record)
         if isinstance(item, DiscoveryFailure):
             self._fail(record, "discovery", item.error)
             return
-        record.descriptor = item
         try:
             self.validator.validate(item)
         except PluginDefinitionError as exc:
             self._fail(record, "validation", exc)
             return
-        for action in item.actions:
-            if action in action_owners:
-                owner = action_owners[action]
+        collisions = {
+            action: action_owners[action] for action in item.actions if action in action_owners
+        }
+        if collisions:
+            for action, owner in collisions.items():
                 message = f"Duplicate callback action: {action} ({owner.plugin_id}, {name})"
-                self._fail(owner, "validation", message)
+                if owner.source != "builtin" or record.source != "external":
+                    self._fail(owner, "validation", message)
                 self._fail(record, "validation", message)
-            else:
-                action_owners[action] = record
+            return
+        action_owners.update(dict.fromkeys(item.actions, record))
 
     def list_plugins(self) -> tuple[PluginRecord, ...]:
         return self.registry.list_all()
@@ -156,6 +173,13 @@ class PluginManager:
             return
         descriptor = record.descriptor
         if descriptor is None:
+            return
+        if descriptor.source == "external" and descriptor.required_permissions:
+            permissions = ", ".join(descriptor.required_permissions)
+            self._update_health(
+                record,
+                f"Required broker permissions unavailable for external plugins: {permissions}",
+            )
             return
         try:
             record.instance = self.loader.create_instance(descriptor, self.context_factory)

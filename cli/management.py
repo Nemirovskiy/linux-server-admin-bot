@@ -15,7 +15,7 @@ from typing import Never
 from bot.plugins.config import ConfigRevision, PluginConfig
 from bot.plugins.manager import PluginManager
 from bot.plugins.models import PluginRecord
-from bot.plugins.sources import BuiltinPluginSource
+from bot.plugins.sources import installed_sources
 from bot.runtime_status import config_digest, read_status, state_directory
 from bot.storage import atomic_write
 from cli.services import ServiceController, ServiceError
@@ -36,8 +36,8 @@ class PluginManagement:
         if diagnostic:
             from bot.plugins.context import default_context_factory
 
-            factory = default_context_factory()
-        manager = PluginManager([BuiltinPluginSource()], self.config, context_factory=factory)
+            factory = default_context_factory(self.config.path, create_data=False)
+        manager = PluginManager(installed_sources(), self.config, context_factory=factory)
         manager.discover(sync=False, configuration=configuration)
         return manager
 
@@ -47,7 +47,10 @@ class PluginManagement:
 
     def plugins(self, runtime: dict | None = None) -> list[dict]:
         manager = self.manager()
-        return [self.describe(record, runtime) for record in manager.list_plugins()]
+        return [
+            *(self.describe(record, runtime) for record in manager.list_plugins()),
+            *(self.describe(record) for record in manager.conflicts),
+        ]
 
     @staticmethod
     def describe(record: PluginRecord, runtime: dict | None = None) -> dict:
@@ -71,6 +74,16 @@ class PluginManagement:
             "metadata": asdict(record.metadata) if record.metadata else None,
             "entry_point": record.descriptor.entry_point if record.descriptor else None,
             "error": record.error,
+            "dependency_issue": record.dependency_issue,
+            "state": record.state.name.lower(),
+            "health": record.health.name.lower(),
+            "distribution": asdict(record.distribution) if record.distribution else None,
+            "required_permissions": (
+                record.descriptor.required_permissions if record.descriptor else ()
+            ),
+            "optional_permissions": (
+                record.descriptor.optional_permissions if record.descriptor else ()
+            ),
         }
 
     def change(

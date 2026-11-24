@@ -28,7 +28,7 @@ class PluginValidator:
             raise PluginDefinitionError(f"Invalid command name: {name}")
         if name in self.reserved_commands:
             raise PluginDefinitionError(f"Reserved command name: {name}")
-        self._validate_metadata(metadata)
+        self._validate_metadata(metadata, external=descriptor.source == "external")
         if not isinstance(metadata.sends_alerts, bool) or not isinstance(
             descriptor.default_enabled, bool
         ):
@@ -38,14 +38,16 @@ class PluginValidator:
         self._validate_actions(descriptor)
 
     @staticmethod
-    def _validate_metadata(metadata: PluginMetadata) -> None:
+    def _validate_metadata(metadata: PluginMetadata, *, external: bool) -> None:
         for field in ("name", "icon", "description"):
             value = getattr(metadata, field)
             if not isinstance(value, str) or not value.strip():
                 raise PluginDefinitionError(f"Invalid metadata.{field}")
         if len(metadata.description) > 256:
             raise PluginDefinitionError("Description exceeds 256 characters")
-        if not isinstance(metadata.version, str) or not _VERSION.fullmatch(metadata.version):
+        if not isinstance(metadata.version, str) or (
+            not external and not _VERSION.fullmatch(metadata.version)
+        ):
             raise PluginDefinitionError(f"Invalid plugin version: {metadata.version}")
         api_version = metadata.api_version
         if not isinstance(api_version, str) or not _API_VERSION.fullmatch(api_version):

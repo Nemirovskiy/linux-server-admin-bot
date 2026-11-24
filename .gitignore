@@ -71,3 +71,7 @@ blocks.toml
 
 # Local management state and backups
 .lsab/
+
+# Local plugin settings and data
+/plugins/
+/data/plugins/

@@ -55,7 +55,7 @@ from bot.plugins.config import PluginConfig
 from bot.plugins.context import default_context_factory
 from bot.plugins.manager import PluginManager
 from bot.plugins.models import PluginState
-from bot.plugins.sources import BuiltinPluginSource
+from bot.plugins.sources import installed_sources
 from bot.runtime_status import RuntimeStatus
 from bot.services import AlertManager
 from config import get_logger, settings, setup_logging
@@ -87,10 +87,10 @@ class BotApplication:
     async def initialize(self, check_only: bool = False) -> None:
         if not check_only:
             settings.require_telegram()
-        factory = default_context_factory()
+        factory = default_context_factory(self.config_path, create_data=not check_only)
         self.alerts = factory.alerts
         self.plugin_manager = PluginManager(
-            sources=(BuiltinPluginSource(),),
+            sources=installed_sources(),
             config=PluginConfig(self.config_path, Path(__file__).with_name("blocks.toml.example")),
             context_factory=factory,
         )
@@ -124,7 +124,7 @@ class BotApplication:
             actions = {action for action in declared if isinstance(action, str)}
             if not record.enabled:
                 disabled_actions.update(actions)
-            elif record.state is PluginState.FAILED:
+            elif record.state is PluginState.FAILED or (record.instance is None and record.dependency_issue):
                 failed_actions.update(actions)
         callbacks = CallbackHandlers(basic, disabled_actions, failed_actions)
 

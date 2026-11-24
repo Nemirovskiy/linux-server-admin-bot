@@ -47,6 +47,13 @@ def parser() -> argparse.ArgumentParser:
         ("apply", "verify configuration, restart and wait for readiness"),
     ):
         actions.add_parser(name, help=help_text)
+    list_parser = actions.choices["list"]
+    sources = list_parser.add_mutually_exclusive_group()
+    sources.add_argument("--builtin", action="store_true", help="show built-in blocks")
+    sources.add_argument("--external", action="store_true", help="show installed external blocks")
+    list_parser.add_argument("--enabled", action="store_true", help="show enabled blocks")
+    list_parser.add_argument("--failed", action="store_true", help="show rejected or failed blocks")
+    list_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     for name, help_text in (
         ("info", "show a block manifest"),
         ("doctor", "check one block, even if disabled"),
@@ -94,9 +101,14 @@ def _locations(args: argparse.Namespace) -> tuple[Path, PluginConfig]:
 
 
 def _plugin_table(plugins: list[dict], *, runtime: bool = False) -> str:
-    headers = ("ID", "SOURCE", "CONFIG")
+    headers = ("ID", "SOURCE", "VERSION", "CONFIG")
     rows = [
-        (row["id"], row["source"], "enabled" if row["enabled"] else "disabled") for row in plugins
+        (
+            row["id"], row["source"],
+            (row["distribution"] or row["metadata"] or {}).get("version", "–"),
+            "enabled" if row["enabled"] else "disabled",
+        )
+        for row in plugins
     ]
     if runtime:
         return table(
@@ -151,26 +163,36 @@ def _plugins(args: argparse.Namespace, management: PluginManagement, project: Pa
     output_json = args.json
     match args.action:
         case "list":
-            rows = management.plugins()
+            runtime = read_status(management.directory) if args.failed else None
+            rows = [
+                row for row in management.plugins(runtime)
+                if (not args.builtin or row["source"] == "builtin")
+                and (not args.external or row["source"] == "external")
+                and (not args.enabled or row["enabled"])
+                and (not args.failed or row["state"] == "failed" or row["execution"] == "failed")
+            ]
             emit(rows, as_json=output_json, text=_plugin_table(rows))
         case "info":
             runtime = read_status(management.directory)
-            row = management.describe(management.manager().get_plugin(args.id), runtime)
+            manager = management.manager()
+            row = management.describe(manager.get_plugin(args.id), runtime)
+            row["rejected"] = [
+                management.describe(record) for record in manager.conflicts if record.plugin_id == args.id
+            ]
             fields = row["metadata"] or {"id": row["id"]}
             details = {
-                **fields,
-                "source": row["source"],
-                "enabled": row["enabled"],
-                "execution": row["execution"],
-                "entry_point": row["entry_point"],
-                "error": row["error"],
+                **fields, "source": row["source"], "enabled": row["enabled"],
+                "execution": row["execution"], "state": row["state"],
+                "entry_point": row["entry_point"], "error": row["error"],
+                "dependency_issue": row["dependency_issue"],
+                **{f"distribution_{key}": value for key, value in (row["distribution"] or {}).items()},
+                "required_permissions": row["required_permissions"],
+                "optional_permissions": row["optional_permissions"],
+                "rejected": [entry["error"] for entry in row["rejected"]],
             }
             emit(
-                row,
-                as_json=output_json,
-                text="\n".join(
-                    f"{key}: {value}" for key, value in details.items() if value is not None
-                ),
+                row, as_json=output_json,
+                text="\n".join(f"{key}: {value}" for key, value in details.items() if value is not None),
             )
         case "check" | "doctor":
             rows = management.diagnose(args.id if args.action == "doctor" else None)

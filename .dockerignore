@@ -19,3 +19,6 @@ blocks.toml
 data/config/
 
 .lsab/
+
+/plugins/
+/data/plugins/
