@@ -1,5 +1,6 @@
 """Route buttons to the core screens and enabled information blocks."""
 from telegram import Update
+from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
 from bot.api.block import safe_delete_message
@@ -27,14 +28,17 @@ class CallbackHandlers:
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        await query.answer()
+        action = (query.data or "").partition("|")[0]
+        try:
+            await query.answer()
+        except TimedOut:
+            logger.warning("Timed out acknowledging callback %s", action)
 
         user = update.effective_user
         if not user or user.id not in settings.allowed_user_ids:
             await query.edit_message_text("🔒 Access denied.")
             return
 
-        action = (query.data or "").partition("|")[0]
         try:
             if action == "menu_main":
                 await self._show_main_menu(query)

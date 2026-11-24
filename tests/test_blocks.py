@@ -2,6 +2,7 @@ from io import BytesIO
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from telegram.error import TimedOut
 from telegram.ext import CallbackQueryHandler, CommandHandler
 
 from bot.blocks import BlockView, select_blocks
@@ -161,6 +162,33 @@ async def test_status_command_and_button_show_compact_block_sections(tmp_path, m
     update.message.reply_text.assert_awaited_once_with(expected, parse_mode="MarkdownV2")
     assert query.edit_message_text.await_args.args == (expected,)
     assert query.edit_message_text.await_args.kwargs["parse_mode"] == "MarkdownV2"
+
+
+async def test_status_back_opens_menu_if_acknowledgement_times_out(tmp_path):
+    path = tmp_path / "blocks.toml"
+    path.write_text("[blocks]\n")
+    app = BotApplication(path)
+    await app.initialize()
+    callback = next(
+        handler.callback for handler in app.app.handlers[0] if isinstance(handler, CallbackQueryHandler)
+    )
+    query = Mock(
+        data="cmd_status", answer=AsyncMock(), edit_message_text=AsyncMock(), message=Mock(photo=())
+    )
+    update = Mock(callback_query=query, effective_user=Mock(id=settings.allowed_user_ids[0]))
+    await callback(update, Mock())
+    assert "SYSTEM STATUS" in query.edit_message_text.await_args.args[0]
+
+    query.data = "menu_main"
+    query.answer.side_effect = TimedOut()
+    query.edit_message_text.reset_mock()
+
+    await callback(update, Mock())
+
+    basic = callback.__self__.basic
+    query.edit_message_text.assert_awaited_once_with(
+        basic.menu_text(), parse_mode="MarkdownV2", reply_markup=basic.menu_keyboard()
+    )
 
 
 async def test_docker_can_be_enabled_independently(tmp_path, monkeypatch):
