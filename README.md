@@ -294,24 +294,17 @@ docker compose build linux-server-admin-bot &&
 ```
 
 The host directory persists across container and image replacement. Use the same
-Compose files for validation and startup when enabling Docker management.
+Compose files for validation and startup.
 When validation reports a missing service or a permission problem, the check
 returns a nonzero exit code. During ordinary startup the bot can still serve
 other blocks, and the affected block shows its diagnostic.
 
-### Docker management
+### Privileged operations
 
-The base Compose service runs without the Docker socket. To enable container
-management, set `docker = true` in `blocks.toml`, set `DOCKER_SOCKET_GID` to the
-socket's group ID if needed, and include the additional Compose file:
-
-```bash
-export DOCKER_SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"
-docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d --force-recreate
-```
-
-To disable management and remove access to the socket, set `docker = false` and
-recreate the service using just the base Compose file.
+Docker and CrowdSec use the optional native [Privilege Broker](docs/privilege-broker.md).
+A system administrator installs it separately and grants individual operations.
+Container deployments run the ordinary monitoring blocks without host Docker
+socket access. Use the native installation for privileged host operations.
 
 ### Adding a block
 

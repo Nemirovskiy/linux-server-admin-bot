@@ -63,8 +63,7 @@ lsab doctor
 
 lsab --service systemd restart
 lsab --service docker status
-lsab --service docker --compose-file docker-compose.yml \
-  --compose-file docker-compose.docker.yml logs --follow
+lsab --service docker --compose-file docker-compose.yml logs --follow
 ```
 
 `auto` выбирает установленную пользовательскую службу
@@ -113,3 +112,5 @@ CLI хранит последний успешно применённый фай
 снимков в каталоге `.lsab/<имя файла>/`. `rollback` восстанавливает
 предыдущую версию файла. Для применения восстановления к службе укажите
 `--apply`. Для Docker требуется доступ к настроенному Docker daemon.
+
+Диагностика брокера и просмотр разрешений описаны в [Privilege Broker](privilege-broker.md).

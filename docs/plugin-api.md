@@ -71,12 +71,11 @@ default_enabled = false
   `stop()` должен освобождать выделенные ресурсы и поддерживать завершение
   после частично выполненного `setup()` или `start()`.
 - `await self.execute_privileged(action, **params)` возвращает `BrokerResult`.
-  Штатный `NullBroker` всегда возвращает `success=False`.
-  `metadata.permissions` описывает права для будущего брокера. Docker и
-  CrowdSec используют прежние способы доступа. Оба выключены по умолчанию.
-  CrowdSec читает данные через `cscli`. Параметры `CROWDSEC_CSCLI` и
-  `CROWDSEC_USE_SUDO=1` по-прежнему задают путь и опциональный вызов
-  через `sudo -n` с правами, уже настроенными на сервере.
+  Для синхронного рендеринга или проверки в рабочем потоке используйте
+  `execute_privileged_sync(action, **params)`. Персональный клиент сверяет
+  действие с `metadata.permissions`. Системные права выдаёт администратор
+  через [Privilege Broker](privilege-broker.md). В установке без брокера
+  `NullBroker` отклоняет запрос с кодом `BROKER_UNAVAILABLE`.
 
 ## Версии и совместимость
 
