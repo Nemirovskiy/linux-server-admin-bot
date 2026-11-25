@@ -61,9 +61,9 @@ def worker():
 @pytest.mark.parametrize(
     ("raw", "uid", "code"),
     [
-        (request("crowdsec", "crowdsec.alerts.read", period="24h"), 1001, "PERMISSION_DENIED"),
+        (request("docker", "docker.containers.read"), 1001, "PERMISSION_DENIED"),
         (request("docker", "system.shell.run"), 1000, "UNKNOWN_ACTION"),
-        (request("crowdsec", "docker.containers.read"), 1000, "PERMISSION_DENIED"),
+        (request("external", "docker.containers.read"), 1000, "PERMISSION_DENIED"),
         (request("docker", "docker.containers.stop", container_id=ID), 1000, "PERMISSION_DENIED"),
         (
             request("docker", "docker.containers.restart", container_id=OTHER_ID),
@@ -81,8 +81,8 @@ def worker():
             "INVALID_PARAMS",
         ),
         (request("docker", "docker.containers.read", path="/etc/shadow"), 1000, "INVALID_PARAMS"),
-        (request("crowdsec", "crowdsec.alerts.read", period="9y"), 1000, "INVALID_PARAMS"),
-        (request("crowdsec", "crowdsec.alerts.read", period="24h") + b"x", 1000, "INVALID_PARAMS"),
+        (request("crowdsec", "crowdsec.alerts.read", period="24h"), 1000, "UNKNOWN_ACTION"),
+        (request("docker", "docker.containers.read") + b"x", 1000, "INVALID_PARAMS"),
         (
             request("docker", "docker.containers.read").replace(b'version":1', b'version":2'),
             1000,
@@ -144,14 +144,10 @@ def test_docker_mutation_checks_identity_and_does_not_retry(monkeypatch):
     runner.assert_called_once()
 
 
-def test_crowdsec_alerts_strip_unneeded_fields(worker):
-    raw = b'[{"id":7,"scenario":"test","api_key":"hidden","decisions":[{"type":"ban","scope":"Ip","value":"192.0.2.5","token":"hidden"}]}]'
-    result, _, auditor = worker(
-        request("crowdsec", "crowdsec.alerts.read", period="24h"), output=raw
-    )
-    assert result["data"][0]["id"] == 7
-    assert result["data"][0]["decisions"][0]["value"] == "192.0.2.5"
-    assert "hidden" not in str(result) + str(auditor.call_args)
+def test_retired_crowdsec_policy_preserves_docker_access():
+    policy = make_policy()
+    assert "crowdsec" not in policy.plugins
+    assert "docker.containers.read" in policy.authorize("docker", "docker.containers.read").allow
 
 
 def test_default_policy_rejects_unassigned_actions():
@@ -191,21 +187,21 @@ def test_executor_limits_timeout_and_output_without_root(monkeypatch):
     assert limit.value.code == "RESULT_TOO_LARGE"
 
 
-async def test_scoped_broker_client_async_and_null(worker):
+async def test_scoped_broker_client_async_and_null():
     transport = Mock()
     transport.exchange.side_effect = lambda raw: dispatch(
         raw,
         identify=lambda: Caller(1000, "bot"),
         policy_loader=make_policy,
-        runner=lambda *_: b"[]",
+        runner=lambda *_: b"",
         auditor=lambda _: None,
     )
-    client = BrokerClient("crowdsec", transport, frozenset({"crowdsec.alerts.read"}))
-    result = await client.execute("crowdsec.alerts.read", {"period": "24h"})
+    client = BrokerClient("docker", transport, frozenset({"docker.containers.read"}))
+    result = await client.execute("docker.containers.read", {})
     assert result.success and result.data == []
-    assert (await client.execute("docker.containers.read", {})).code == "PERMISSION_DENIED"
+    assert (await client.execute("docker.containers.restart", {})).code == "PERMISSION_DENIED"
     assert (
-        client.execute_sync("crowdsec.alerts.read", {"period": "24h"}).code == "BROKER_UNAVAILABLE"
+        client.execute_sync("docker.containers.read", {}).code == "BROKER_UNAVAILABLE"
     )
     assert (await NullBroker().execute("docker.containers.read", {})).code == "BROKER_UNAVAILABLE"
     transport.exchange.assert_called_once()
@@ -240,7 +236,12 @@ def test_config_scope_binds_the_manifest_id_and_permissions():
     assert docker.plugin_id == "docker"
     assert docker.permissions == frozenset(descriptors["docker"].metadata.permissions)
     assert isinstance(factory(descriptors["cpu"]).broker, NullBroker)
-    assert factory(descriptors["crowdsec"]).broker is not docker
+    assert factory(descriptors["docker"]).broker is not docker
+
+    from dataclasses import replace
+
+    # External manifests cannot reuse grants from an older installed helper.
+    assert isinstance(factory(replace(descriptors["docker"], source="external")).broker, NullBroker)
 
 
 def test_installed_admin_policy_grant_and_revoke_are_atomic(tmp_path, monkeypatch):

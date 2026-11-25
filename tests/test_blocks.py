@@ -400,8 +400,14 @@ async def test_config_check_reports_missing_dependencies(tmp_path, monkeypatch):
 
 
 def test_removed_crowdsec_switch_is_preserved_and_ignored(tmp_path):
+    from bot.plugins.manager import PluginManager
+    from bot.plugins.sources import BuiltinPluginSource
+
     path = tmp_path / "blocks.toml"
     original = "[blocks]\ncpu = true\ncrowdsec = true\n"
     path.write_text(original)
-    assert PluginConfig(path).sync({"cpu": False}) == {"cpu": True, "crowdsec": True}
+    manager = PluginManager((BuiltinPluginSource(),), PluginConfig(path))
+    manager.discover(sync=False)
+    assert manager.get_plugin("crowdsec").source == "missing"
+    assert [record.plugin_id for record in manager.startup_records()] == ["cpu"]
     assert path.read_text() == original

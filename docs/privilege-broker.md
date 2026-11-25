@@ -1,7 +1,7 @@
 # Privilege Broker v1
 
 Бот работает от обычного пользователя. Когда режим `LSAB_BROKER=sudo`
-включён, реестр выдаёт Docker и CrowdSec собственные клиенты брокера.
+включён, реестр выдаёт встроенному Docker клиент брокера.
 При вызове операции клиент проверяет декларацию плагина и отправляет
 один JSON-запрос отдельно установленному helper через `sudo -n`.
 Helper использует системный Python в изолированном режиме и завершается
@@ -24,8 +24,7 @@ Helper использует системный Python в изолированн�
   контейнеров. Перед изменением helper сверяет фактический ID. Если список ID
   указан, он также ограничивает чтение. Доверие к daemon и другим операторам
   Docker остаётся частью модели хоста.
-- Docker передаёт выбранные поля состояния и метрик. Вывод CrowdSec
-  ограничен полями, которые нужны для сводки, и числом bouncers.
+- Docker передаёт выбранные поля состояния и метрик.
   Переменные окружения контейнеров, аргументы запуска, ключи и внутренний
   вывод команд не выдаются клиенту и не пишутся в аудит.
 - По умолчанию все рабочие операции запрещены. Некорректная политика,
@@ -37,8 +36,8 @@ Helper использует системный Python в изолированн�
 Брокер опционален. Обычная установка бота сохраняет режим
 `LSAB_BROKER=off`. Для нативного брокера используйте выделенного
 пользователя бота без sudo к произвольным командам и без прямого доступа
-к сокету или удалённому Docker API. При переходе удалите прежние отдельные
-правила sudo для `cscli` и прямые разрешения Docker, например членство
+к сокету или удалённому Docker API. При переходе удалите прямые
+разрешения Docker, например членство
 в группе `docker`. Установщик отклоняет группу `docker` и доступную
 на запись стандартную точку сокета.
 
@@ -71,11 +70,9 @@ python3 packaging/broker/build.py /tmp/lsab-broker-release
 Пример выдачи и отзыва разрешений от системного администратора.
 
 ```bash
-sudo /usr/local/sbin/lsab-broker-admin grant crowdsec crowdsec.status.read
-sudo /usr/local/sbin/lsab-broker-admin grant crowdsec crowdsec.alerts.read
-sudo /usr/local/sbin/lsab-broker-admin grant crowdsec crowdsec.bouncers.read
 sudo /usr/local/sbin/lsab-broker-admin grant docker docker.containers.read
-sudo /usr/local/sbin/lsab-broker-admin revoke crowdsec crowdsec.alerts.read
+sudo /usr/local/sbin/lsab-broker-admin grant docker docker.containers.inspect
+sudo /usr/local/sbin/lsab-broker-admin revoke docker docker.containers.inspect
 ```
 
 Для `docker.containers.start`, `stop` или `restart` при первом таком
@@ -94,7 +91,7 @@ lsab broker doctor
 lsab broker actions
 lsab broker info docker.containers.restart
 lsab permissions list
-lsab permissions requested crowdsec
+lsab permissions requested docker
 lsab permissions missing docker
 lsab permissions browse
 lsab plugins check
@@ -109,11 +106,15 @@ lsab plugins check
 системное имя, заявленный ID плагина, известное действие, код и длительность.
 Параметры и вывод операции в аудит не включаются.
 
+При обновлении с версии со встроенным CrowdSec установите новый helper.
+Он принимает старые файлы политик с известными разрешениями CrowdSec,
+исключая эти разрешения из активной политики.
+
 ## Docker Compose
 
 Контейнерная установка бота продолжает обслуживать непривилегированные
 блоки. Compose не монтирует сокет Docker и не добавляет группу доступа
 к нему. При обновлении пересоздайте прежний контейнер, чтобы убрать старый
-mount и группу доступа. Для управления Docker или CrowdSec на хосте используйте нативную
+mount и группу доступа. Для управления Docker на хосте используйте нативную
 установку бота с брокером. Отдельный транспорт между контейнером и
 брокером хоста относится к следующему развитию архитектуры.

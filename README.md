@@ -249,7 +249,6 @@ docker = false
 | `uptime` | `/uptime` | On |
 | `services` | `/services` | On |
 | `docker` | `/docker` | Off |
-| `crowdsec` | `/crowdsec` | Off |
 
 The selection applies to everyone using the bot. When you disable a block,
 its button, command, status summary and scheduled checks are removed.
@@ -301,7 +300,7 @@ other blocks, and the affected block shows its diagnostic.
 
 ### Privileged operations
 
-Docker and CrowdSec use the optional native [Privilege Broker](docs/privilege-broker.md).
+Docker uses the optional native [Privilege Broker](docs/privilege-broker.md).
 A system administrator installs it separately and grants individual operations.
 Container deployments run the ordinary monitoring blocks without host Docker
 socket access. Use the native installation for privileged host operations.

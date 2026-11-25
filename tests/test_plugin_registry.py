@@ -29,7 +29,7 @@ from bot.plugins.sources import BuiltinPluginSource
 config = PluginConfig(Path('blocks.toml'))
 manager = PluginManager([BuiltinPluginSource()], config)
 manager.discover()
-assert len(manager.list_plugins()) == 10
+assert len(manager.list_plugins()) == 9
 assert manager.get_plugin('cpu').metadata.name == 'CPU'
 assert manager.get_plugin('cpu').enabled
 assert not manager.get_plugin('docker').enabled

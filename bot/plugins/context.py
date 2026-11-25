@@ -31,7 +31,7 @@ class PluginContextFactory:
         config, data_dir = self._paths(descriptor)
         broker = (
             BrokerClient(metadata.id, self.transport, frozenset(metadata.permissions))
-            if self.transport is not None and metadata.permissions
+            if self.transport is not None and metadata.permissions and descriptor.source == "builtin"
             else NullBroker()
         )
         return PluginContext(

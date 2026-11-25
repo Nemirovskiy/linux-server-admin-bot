@@ -2,7 +2,7 @@
 
 CLI управляет встроенными блоками Linux Server Admin Bot. Команды каталога
 и диагностики работают без Telegram-токена и соединения с Telegram.
-Диагностика Docker или CrowdSec проверяет локальные службы с правами
+Диагностика Docker проверяет локальную службу с правами
 пользователя, который запустил CLI.
 
 ## Установка и запуск
@@ -28,11 +28,11 @@ lsab plugins list
 
 ```bash
 lsab plugins list
-lsab --json plugins info crowdsec
+lsab --json plugins info docker
 lsab plugins enable cpu memory disk
-lsab plugins disable docker crowdsec --dry-run
+lsab plugins disable docker network --dry-run
 lsab plugins check
-lsab plugins doctor crowdsec
+lsab plugins doctor docker
 lsab plugins configure
 ```
 

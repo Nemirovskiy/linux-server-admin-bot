@@ -11,6 +11,11 @@ from broker.security import Caller, trusted
 
 POLICY_PATH = Path("/etc/lsab/broker/permissions.toml")
 MAX_POLICY = 64 * 1024
+# Parse old CrowdSec grants without exposing any of the retired actions.
+_RETIRED_CROWDSEC_OWNERS = dict.fromkeys(
+    ("crowdsec.status.read", "crowdsec.alerts.read", "crowdsec.decisions.read", "crowdsec.bouncers.read"),
+    "crowdsec",
+)
 
 
 @dataclass(frozen=True)
@@ -49,10 +54,13 @@ class Policy:
         plugins = document.get("plugins", {})
         if not isinstance(plugins, dict):
             raise ValueError("Invalid plugins table")
-        return cls(
-            frozenset(uids),
-            {name: _grant(name, fields, owners) for name, fields in plugins.items()},
-        )
+        grants = {}
+        for name, fields in plugins.items():
+            if name == "crowdsec":
+                _grant(name, fields, _RETIRED_CROWDSEC_OWNERS)
+            else:
+                grants[name] = _grant(name, fields, owners)
+        return cls(frozenset(uids), grants)
 
     def authorize_caller(self, caller: Caller) -> None:
         if caller.uid not in self.callers:

@@ -30,13 +30,12 @@ def test_cli_catalog_dry_run_and_diagnostics_without_telegram(tmp_path):
         )
 
     rows = json.loads(invoke("plugins", "list").stdout)
-    assert len(rows) == 10
+    assert len(rows) == 9
     assert next(row for row in rows if row["id"] == "cpu")["enabled"]
     assert not next(row for row in rows if row["id"] == "docker")["enabled"]
-    preview = json.loads(invoke("plugins", "enable", "docker", "crowdsec", "--dry-run").stdout)
+    preview = json.loads(invoke("plugins", "enable", "docker", "--dry-run").stdout)
     assert preview["changes"] == {
         "docker": {"before": False, "after": True},
-        "crowdsec": {"before": False, "after": True},
     }
     assert not config.exists()
     assert not (tmp_path / ".lsab").exists()
@@ -115,10 +114,10 @@ def test_offline_broker_version_and_permission_declarations(tmp_path, capsys):
     config = tmp_path / "nonexistent.toml"
     assert main(["--json", "broker", "version"]) == 0
     assert json.loads(capsys.readouterr().out)["protocol_version"] == 1
-    assert main(["--config", str(config), "--json", "permissions", "requested", "crowdsec"]) == 0
+    assert main(["--config", str(config), "--json", "permissions", "requested", "docker"]) == 0
     result, = json.loads(capsys.readouterr().out)
-    assert "crowdsec.status.read" in result["requested"]
-    assert "crowdsec.alerts.read" in result["requested"]
+    assert "docker.containers.read" in result["requested"]
+    assert "docker.containers.inspect" in result["requested"]
     assert not config.exists()
 
 

@@ -113,16 +113,15 @@ async def test_all_builtin_blocks_can_be_loaded_in_config_order(
     config = tmp_path / "blocks.toml"
     config.write_text("[blocks]\n" + "".join(f"{name} = true\n" for name in names))
     monkeypatch.setattr("bot.blocks.docker.DockerBlock.dependency_issue", lambda self: None)
-    monkeypatch.setattr("bot.blocks.crowdsec.CrowdSecBlock.dependency_issue", lambda self: None)
     app = BotApplication(config)
     await app.initialize()
     await app.start()
 
-    assert len(names) == 10
+    assert len(names) == 9
     assert [block.metadata.id for block in app.plugin_manager.running_blocks()] == names
     assert all(
         record.health is PluginHealth.HEALTHY
         for record in app.plugin_manager.registry.list_running()
     )
-    assert len(app.health_monitor.checks) == 4
+    assert len(app.health_monitor.checks) == 3
     await app.stop()

@@ -1,4 +1,4 @@
-"""Fixed operations and allowlisted result fields for CrowdSec and Docker."""
+"""Fixed operations and allowlisted result fields for Docker."""
 
 import ipaddress
 import math
@@ -9,7 +9,6 @@ from typing import Any
 
 from broker.protocol import CONTAINER_ID, BrokerError, json_loads
 
-CSCLI = ("/usr/bin/cscli",)
 DOCKER_CONFIG = "/etc/lsab/broker/docker"
 DOCKER = (
     "/usr/bin/docker",
@@ -31,15 +30,6 @@ def _empty(_: bytes) -> None:
     return None
 
 
-def _array(raw: bytes) -> list[dict]:
-    values = json_loads(raw)
-    if values is None:
-        return []
-    if not isinstance(values, list) or any(not isinstance(value, dict) for value in values):
-        raise ValueError("Expected an array of records")
-    return values
-
-
 def _text(value: Any, size: int = 160) -> str:
     return value[:size] if isinstance(value, str) else ""
 
@@ -53,41 +43,6 @@ def _ip(value: Any) -> str:
         return str(ipaddress.ip_address(value)) if isinstance(value, str) else ""
     except ValueError:
         return ""
-
-
-def _decision(row: dict) -> dict:
-    scope = _text(row.get("scope"), 32)
-    return {
-        "scope": scope,
-        "type": _text(row.get("type"), 32),
-        "origin": _text(row.get("origin"), 48),
-        "value": _ip(row.get("value")) if scope.lower() == "ip" else "",
-    }
-
-
-def _decisions(raw: bytes) -> list[dict]:
-    return [_decision(row) for row in _array(raw)]
-
-
-def _alerts(raw: bytes) -> list[dict]:
-    return [
-        {
-            "id": _integer(row.get("id")),
-            "scenario": _text(row.get("scenario")),
-            "created_at": _text(row.get("created_at"), 48),
-            "events_count": _integer(row.get("events_count")),
-            "kind": _text(row.get("kind"), 32),
-            "simulated": row.get("simulated") is True,
-            "decisions": [
-                _decision(item) for item in row.get("decisions") or [] if isinstance(item, dict)
-            ],
-        }
-        for row in _array(raw)
-    ]
-
-
-def _bouncers(raw: bytes) -> dict:
-    return {"count": len(_array(raw))}
 
 
 def _docker_rows(raw: bytes) -> list[dict]:
@@ -193,9 +148,6 @@ class Action:
         expected = {self.params} if self.params else set()
         if set(params) != expected:
             raise BrokerError("INVALID_PARAMS", f"Expected parameters: {self.params or 'none'}.")
-        if self.params == "period":
-            if params["period"] != "24h":
-                raise BrokerError("INVALID_PARAMS", "The supported alert period is 24h.")
         if self.params == "container_id":
             value = params["container_id"]
             if not isinstance(value, str) or not CONTAINER_ID.fullmatch(value):
@@ -207,19 +159,6 @@ class Action:
 
 
 ACTIONS = {
-    "crowdsec.status.read": Action("crowdsec", (*CSCLI, "lapi", "status")),
-    "crowdsec.alerts.read": Action(
-        "crowdsec",
-        (*CSCLI, "alerts", "list", "--since", "24h", "--limit", "0", "-o", "json"),
-        _alerts,
-        "period",
-    ),
-    "crowdsec.decisions.read": Action(
-        "crowdsec", (*CSCLI, "decisions", "list", "-o", "json"), _decisions
-    ),
-    "crowdsec.bouncers.read": Action(
-        "crowdsec", (*CSCLI, "bouncers", "list", "-o", "json"), _bouncers
-    ),
     "docker.containers.read": Action(
         "docker",
         (*DOCKER, "container", "ls", "--all", "--no-trunc", "--format", "{{json .}}"),
