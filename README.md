@@ -308,7 +308,8 @@ socket access. Use the native installation for privileged host operations.
 
 ### External plugins
 
-Install trusted packages into the bot's Python environment. The bot discovers
+Use the [plugin installer](docs/plugin-installer.md) to install, update, and
+roll back trusted external packages. The bot discovers
 `lsab.plugins` entry points and shows them with `lsab plugins list --external`.
 New external plugins are disabled until selected. See the
 [external plugin guide](docs/external-plugins.md) for SDK, compatibility,
