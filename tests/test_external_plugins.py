@@ -242,3 +242,35 @@ async def test_shadowed_module_is_rejected_before_import(environment, tmp_path, 
     with pytest.raises(ValueError, match="Module path does not belong"):
         await BotApplication(config).initialize(check_only=True)
     assert module not in sys.modules
+
+
+def test_editable_install_ignores_its_generated_egg_info(environment, tmp_path, monkeypatch):
+    import shutil
+
+    install, _ = environment
+    name = install("demo")
+    site = tmp_path / "site"
+    dist = next(site.glob("*.dist-info"))
+    project = tmp_path / "project"
+    source = project / "src"
+    source.mkdir(parents=True)
+    shutil.move(site / name, source / name)
+    egg = source / f"{name}.egg-info"
+    egg.mkdir()
+    shutil.copyfile(dist / "entry_points.txt", egg / "entry_points.txt")
+    shutil.copyfile(dist / "METADATA", egg / "PKG-INFO")
+    (dist / "RECORD").write_text("")
+    (dist / "direct_url.json").write_text(
+        json.dumps({"url": project.as_uri(), "dir_info": {"editable": True}})
+    )
+    monkeypatch.syspath_prepend(str(source))
+
+    items = [
+        item
+        for item in EntryPointPluginSource().discover()
+        if item.distribution and item.distribution.name == name.replace("_", "-")
+    ]
+    assert len(items) == 1
+    assert items[0].metadata.id == "demo"
+    assert items[0].module_file == source / name / "plugin.py"
+    assert name not in sys.modules

@@ -17,7 +17,7 @@ from importlib.metadata import (
 )
 from logging import getLogger
 from pathlib import Path, PurePosixPath
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from bot.api import PLUGIN_API_VERSION, PluginMetadata
 from bot.plugins.models import DiscoveryFailure, DistributionInfo, PluginDescriptor
@@ -36,22 +36,33 @@ _PERMISSION = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,3}")
 
 def _entries() -> Iterator[EntryPoint]:
     seen = set()
+    candidates = []
+    editable_roots = set()
     for distribution in distributions():
         try:
             entries = distribution.entry_points.select(group=GROUP)
             if not entries:
                 continue
-            # lib/lib64 and other site-packages aliases can expose one wheel twice.
-            key = (
-                Path(distribution.locate_file("")).resolve(),
-                canonicalize_name(distribution.metadata.get("Name") or ""),
-                distribution.version,
-            )
-            if key not in seen:
-                seen.add(key)
-                yield from entries
+            # lib/lib64 aliases can expose the same installed distribution twice.
+            site = Path(distribution.locate_file("")).resolve()
+            name = canonicalize_name(distribution.metadata.get("Name") or "")
+            installed_version = distribution.version
+            key = site, name, installed_version
+            if key in seen:
+                continue
+            seen.add(key)
+            editable = _editable_root(distribution)
+            if editable is not None:
+                editable_roots.update(
+                    (root, name, installed_version) for root in (editable, editable / "src")
+                )
+            candidates.append((key, editable, entries))
         except (OSError, ValueError, AttributeError):
             logger.warning("Skipping unreadable entry point metadata in an installed distribution")
+    for key, editable, entries in candidates:
+        # Setuptools can also leave generated egg-info in the editable source tree.
+        if editable is not None or key not in editable_roots:
+            yield from entries
 
 
 class EntryPointPluginSource:
@@ -73,10 +84,13 @@ class EntryPointPluginSource:
             module = PurePosixPath(*entry.module.split("."))
             root_package = PurePosixPath(module.parts[0])
             records = {PurePosixPath(path.as_posix()): path for path in entry.dist.files or ()}
-            manifest = _locate(entry.dist, records, (root_package / "plugin.toml",))
-            module_file = _locate(
-                entry.dist, records, (module.with_suffix(".py"), module / "__init__.py")
-            )
+            try:
+                manifest = _locate(entry.dist, records, (root_package / "plugin.toml",))
+                module_file = _locate(
+                    entry.dist, records, (module.with_suffix(".py"), module / "__init__.py")
+                )
+            except ValueError:
+                manifest, module_file = _editable_files(entry.dist, root_package, module)
             with manifest.open("rb") as stream:
                 raw = stream.read(MAX_MANIFEST_BYTES + 1)
             if len(raw) > MAX_MANIFEST_BYTES:
@@ -96,6 +110,37 @@ def _locate(dist: Distribution, files: dict, choices: Sequence[PurePosixPath]) -
         if record is not None:
             return Path(dist.locate_file(record)).resolve(strict=True)
     raise ValueError(f"Installed distribution does not record {choices[0]}")
+
+
+def _editable_root(dist: Distribution) -> Path | None:
+    try:
+        info = json.loads(dist.read_text("direct_url.json") or "{}")
+        uri = urlsplit(info.get("url") or "")
+        if (
+            info.get("dir_info", {}).get("editable") is True
+            and uri.scheme == "file"
+            and not uri.netloc
+        ):
+            return Path(unquote(uri.path)).resolve(strict=True)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def _editable_files(
+    dist: Distribution, root_package: PurePosixPath, module: PurePosixPath
+) -> tuple[Path, Path]:
+    project = _editable_root(dist)
+    if project is None:
+        raise ValueError(f"Installed distribution does not record {root_package / 'plugin.toml'}")
+    for base in (project / "src", project):
+        manifest = base / root_package / "plugin.toml"
+        for module_file in (base / module.with_suffix(".py"), base / module / "__init__.py"):
+            if manifest.is_file() and module_file.is_file():
+                paths = manifest.resolve(), module_file.resolve()
+                if all(path.is_relative_to(project) for path in paths):
+                    return paths
+    raise ValueError("Editable plugin must use a flat or src layout with a local manifest")
 
 
 def _origin(dist: Distribution) -> str | None:
@@ -128,7 +173,9 @@ def _distribution(dist: Distribution) -> DistributionInfo:
     )
 
 
-def _check_requirements(distribution: DistributionInfo) -> None:
+def _check_requirements(
+    distribution: DistributionInfo, *, pending_dependencies: bool = False
+) -> None:
     python_version = platform.python_version()
     if distribution.requires_python and not SpecifierSet(distribution.requires_python).contains(
         python_version, prereleases=True
@@ -147,6 +194,8 @@ def _check_requirements(distribution: DistributionInfo) -> None:
                 raise ValueError("Declare a version requirement for lsab-api")
             api_declared = True
             installed = _sdk_version()
+        elif pending_dependencies:
+            continue
         else:
             try:
                 installed = version(requirement.name)
@@ -186,10 +235,20 @@ def _permissions(data: object) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return required, optional
 
 
+def _storage_schema(data: dict) -> int:
+    storage = data.get("data", {})
+    if not isinstance(storage, dict) or set(storage) - {"schema_version"}:
+        raise ValueError("Invalid plugin data table")
+    schema = storage.get("schema_version", 1)
+    if not isinstance(schema, int) or isinstance(schema, bool) or schema < 1:
+        raise ValueError("data.schema_version must be a positive integer")
+    return schema
+
+
 def _descriptor(
     data: dict, entry: EntryPoint, distribution: DistributionInfo, module_file: Path
 ) -> PluginDescriptor:
-    if set(data) - {"plugin", "permissions", "compatibility"} or not isinstance(
+    if set(data) - {"plugin", "permissions", "compatibility", "data"} or not isinstance(
         data.get("plugin"), dict
     ):
         raise ValueError("Expected a [plugin] manifest table")
@@ -211,6 +270,7 @@ def _descriptor(
         raise ValueError("platforms must be an array of strings")
     if sys.platform not in platforms:
         raise ValueError(f"Unsupported platform: {sys.platform}")
+    schema = _storage_schema(data)
     required, optional = _permissions(data.get("permissions", {}))
     return PluginDescriptor(
         metadata=PluginMetadata(
@@ -224,4 +284,5 @@ def _descriptor(
         optional_permissions=optional,
         entry=entry,
         module_file=module_file,
+        data_schema_version=schema,
     )

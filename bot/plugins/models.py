@@ -53,6 +53,7 @@ class PluginDescriptor:
     optional_permissions: tuple[str, ...] = ()
     entry: EntryPoint | None = field(default=None, compare=False, repr=False)
     module_file: Path | None = None
+    data_schema_version: int = 1
 
     @property
     def actions(self) -> tuple[str, ...]:
