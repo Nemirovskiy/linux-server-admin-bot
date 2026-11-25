@@ -43,7 +43,7 @@ COPY blocks.toml.example .
 
 RUN printf '#!/bin/sh\nexec python -m cli "$@"\n' > /usr/local/bin/lsab && \
     chmod 755 /usr/local/bin/lsab
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app LSAB_INSTALLER_CONTAINER=1
 
 # Create non-root user for security
 RUN useradd -m -u 1000 botuser && \

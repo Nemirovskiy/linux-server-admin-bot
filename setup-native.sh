@@ -102,7 +102,7 @@ Description=Linux Server Admin Bot
 [Service]
 WorkingDirectory=$working_dir
 Environment=HOST_PROC_PATH=/proc HOST_SYS_PATH=/sys
-ExecStart="$unit_path/.venv/bin/python" -u "$unit_path/main.py"
+ExecStart="$unit_path/packaging/run-native.sh"
 Restart=on-failure
 RestartSec=5
 

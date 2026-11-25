@@ -75,3 +75,6 @@ blocks.toml
 # Local plugin settings and data
 /plugins/
 /data/plugins/
+
+# Managed plugin environments, history and wheels
+/runtime/

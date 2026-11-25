@@ -270,12 +270,17 @@ class PluginManagement:
         text: str,
         previous_run: str | None,
         expected_plugins: set[str],
+        *,
+        environment: Path | None = None,
     ) -> dict:
         deadline = time.monotonic() + self.ready_timeout
         digest = config_digest(text)
         while time.monotonic() < deadline:
             runtime = read_status(self.directory)
-            if runtime and runtime["run_id"] != previous_run and runtime["config_hash"] == digest:
+            if (
+                runtime and runtime["run_id"] != previous_run and runtime["config_hash"] == digest
+                and (environment is None or runtime.get("environment") == str(environment.resolve()))
+            ):
                 service = controller.status()
                 if service["state"] in _ACTIVE and (
                     not service.get("pid") or service["pid"] == runtime["pid"]

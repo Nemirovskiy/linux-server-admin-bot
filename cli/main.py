@@ -66,7 +66,13 @@ def parser() -> argparse.ArgumentParser:
         modes.add_argument("--dry-run", action="store_true", help="preview without writing")
         modes.add_argument("--apply", action="store_true", help="validate and restart after saving")
     rollback = actions.add_parser("rollback", help="restore a previous verified configuration")
-    rollback.add_argument("--apply", action="store_true", help="restart after restoring")
+    rollback.add_argument("id", nargs="?", help="restore a previous version of one external plugin")
+    rollback.add_argument("--apply", action="store_true", help="restart after restoring configuration")
+    rollback.add_argument("--config-only", action="store_true", help="restore blocks.toml")
+    rollback.add_argument("--yes", action="store_true", help="confirm package rollback")
+    from cli.installer_cli import add_commands
+
+    add_commands(actions)
     for name, help_text in (
         ("status", "show service, desired and runtime state"),
         ("start", "start the service"),
@@ -160,6 +166,20 @@ def _interactive(management: PluginManagement, args: argparse.Namespace, project
 
 
 def _plugins(args: argparse.Namespace, management: PluginManagement, project: Path) -> int:
+    from cli.installer_cli import COMMANDS
+
+    managed = (project / "runtime" / "previous").is_symlink()
+    package_rollback = (
+        args.action == "rollback" and not args.config_only and not args.apply
+        and (args.id is not None or managed)
+    )
+    if args.action in COMMANDS or package_rollback:
+        from cli.installer import Installer
+        from cli.installer_cli import rollback, run
+
+        controller = service_controller(args.service, project, args.compose_file)
+        installer = Installer(project, management, controller)
+        return rollback(args, installer) if package_rollback else run(args, installer)
     output_json = args.json
     match args.action:
         case "list":
@@ -220,6 +240,8 @@ def _plugins(args: argparse.Namespace, management: PluginManagement, project: Pa
                 text="Service is ready with the new configuration.",
             )
         case "rollback":
+            if args.id:
+                raise ValueError("A plugin ID is only accepted for package rollback")
             controller = (
                 service_controller(args.service, project, args.compose_file) if args.apply else None
             )
@@ -295,6 +317,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s: %(message)s"
     )
     try:
+        if argv is None:
+            project, _ = _locations(args)
+            pointer = project / "runtime" / "current"
+            if pointer.is_symlink() and Path(sys.prefix).resolve() != pointer.resolve():
+                python = pointer.resolve() / "bin" / "python"
+                os.execv(python, [str(python), "-m", "cli", *sys.argv[1:]])
         return _run(args)
     except KeyError as exc:
         error = f"Unknown block: {exc.args[0]}"

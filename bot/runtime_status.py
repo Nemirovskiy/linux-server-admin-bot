@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import sys
 import time
 from contextlib import suppress
 from logging import getLogger
@@ -137,6 +138,7 @@ class RuntimeStatus:
         records = self.manager.list_plugins()
         status = {
             "pid": self.pid,
+            "environment": str(Path(sys.prefix).resolve()),
             "process_identity": self.identity,
             "run_id": self.run_id,
             "ready": ready,

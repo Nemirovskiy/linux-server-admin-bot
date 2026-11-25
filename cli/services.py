@@ -88,6 +88,11 @@ class SystemdUserController:
             args.append("--follow")
         return _run(args, follow=follow).stdout or ""
 
+    def ensure_environment_launcher(self, project: Path) -> None:
+        launch = self._show("ExecStart").get("ExecStart", "")
+        if str(project / "packaging" / "run-native.sh") not in launch:
+            raise ServiceError("Install the current native systemd launcher before switching environments")
+
     def ensure_target(self, config_path: Path) -> None:
         properties = self._show("WorkingDirectory", "Environment", "LoadState")
         base = properties.get("WorkingDirectory")

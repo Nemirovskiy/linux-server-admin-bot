@@ -68,6 +68,17 @@ class PluginConfig:
     def preview(self, defaults: Mapping[str, bool]) -> ConfigRevision:
         return self._plan(self.snapshot(), {}, defaults)
 
+    def plan_switches(
+        self, updates: Mapping[str, bool], defaults: Mapping[str, bool]
+    ) -> ConfigRevision:
+        return self._plan(self.snapshot(), updates, defaults)
+
+    def remove(self, *, expected: str | None) -> None:
+        with self._lock():
+            if self.snapshot() != expected:
+                raise ValueError("Blocks configuration changed during the update. Retry.")
+            self.path.unlink(missing_ok=True)
+
     def update_switches(
         self,
         updates: Mapping[str, bool],
