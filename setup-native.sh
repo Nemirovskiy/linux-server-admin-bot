@@ -4,6 +4,15 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 project_dir=$(pwd -P)
 service=linux-server-admin-bot.service
+broker_bundle=
+
+if (( $# )); then
+    if [[ $# != 2 || $1 != --broker-bundle || $2 != /* ]]; then
+        echo "Usage: ./setup-native.sh [--broker-bundle /path/to/root-owned-bundle]" >&2
+        exit 1
+    fi
+    broker_bundle=$2
+fi
 
 if (( EUID == 0 )); then
     echo "Run this installer as the user who will run the bot, without sudo." >&2
@@ -51,6 +60,46 @@ fi
 if grep -Eq 'your_bot_token_here|^TELEGRAM_ALLOWED_USER_IDS=123456789,987654321([[:space:]]|$)' .env; then
     echo "Set TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_IDS in $project_dir/.env."
     exit 1
+fi
+
+if [[ -z $broker_bundle && -t 0 && ! -x /usr/local/libexec/lsab-broker/lsab-broker ]]; then
+    echo "To install the optional privilege broker, use a verified bundle staged by your administrator."
+    read -r -p "Absolute path to the broker bundle (Enter to skip): " broker_bundle || true
+fi
+if [[ -n $broker_bundle ]]; then
+    if [[ $broker_bundle != /* ]]; then
+        echo "Provide an absolute path to the root-owned broker bundle." >&2
+        exit 1
+    fi
+    # Check ownership as root before running the bundle, which may be under /root.
+    /usr/bin/sudo -- /usr/bin/python3 -I -c '
+import os
+import stat
+import sys
+from pathlib import Path
+
+installer = Path(sys.argv[1]) / "install.sh"
+if ".." in installer.parts:
+    raise SystemExit("Use an absolute bundle path without parent traversal")
+for path in (*reversed(installer.parents), installer):
+    info = path.lstat()
+    valid = stat.S_ISDIR(info.st_mode) if path != installer else stat.S_ISREG(info.st_mode)
+    if info.st_uid or info.st_mode & 0o022 or not valid:
+        raise SystemExit(f"Untrusted broker bundle path: {path}")
+os.execve("/bin/bash", ["/bin/bash", str(installer), sys.argv[2]],
+          {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"})
+' "$broker_bundle" "$(id -un)"
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+env = Path(".env")
+text = env.read_text()
+text, count = re.subn(
+    r"(?m)^[ \t]*(?:export[ \t]+)?LSAB_BROKER[ \t]*=.*$", "LSAB_BROKER=sudo", text
+)
+env.write_text(text if count else text.rstrip() + "\nLSAB_BROKER=sudo\n")
+PY
 fi
 
 if [[ ! -x .venv/bin/python ]]; then

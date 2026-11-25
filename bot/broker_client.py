@@ -16,6 +16,7 @@ class BrokerClient:
     plugin_id: str
     transport: Transport
     permissions: frozenset[str]
+    artifact: str | None = None
 
     async def execute(self, action: str, params: Mapping[str, Any]) -> BrokerResult:
         return await asyncio.to_thread(self.execute_sync, action, params)
@@ -29,6 +30,9 @@ class BrokerClient:
             return BrokerResult(
                 False, "Use the async broker interface in the event loop.", "BROKER_UNAVAILABLE"
             )
+        return self._exchange(action, params)
+
+    def _exchange(self, action: str, params: Mapping[str, Any]) -> BrokerResult:
         if action not in self.permissions:
             return BrokerResult(
                 False,
@@ -36,7 +40,7 @@ class BrokerClient:
                 "PERMISSION_DENIED",
             )
         try:
-            request = Request(uuid4().hex, self.plugin_id, action, dict(params))
+            request = Request(uuid4().hex, self.plugin_id, action, dict(params), self.artifact)
             payload = request.encode()
             Request.parse(payload)
         except (ValueError, TypeError, RecursionError, BrokerError):
@@ -46,6 +50,11 @@ class BrokerClient:
             return _decode(response, request.request_id)
         except BrokerError as exc:
             return BrokerResult(False, str(exc), exc.code)
+
+
+def broker_grants(transport: Transport) -> BrokerResult:
+    client = BrokerClient("broker", transport, frozenset({"broker.grants"}))
+    return client._exchange("broker.grants", {})
 
 
 def _decode(raw: bytes, request_id: str) -> BrokerResult:

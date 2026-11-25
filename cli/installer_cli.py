@@ -11,6 +11,7 @@ from pathlib import Path
 from cli.installer import Installer
 from cli.installer_sources import Source, resolve
 from cli.output import emit, table
+from cli.plugin_permissions import approve
 from packaging.version import Version
 
 COMMANDS = {
@@ -113,9 +114,10 @@ def _plan(
         # In JSON mode emit a single document after activation.
         print(json.dumps(plan, ensure_ascii=False, indent=2), file=sys.stderr)
         _confirm(args, "Apply the installation plan?")
-        return installer.apply(
-            plan, wheel, inventory, allow_migration=getattr(args, "allow_migration", False)
-        )
+        options = {"allow_migration": getattr(args, "allow_migration", False)}
+        if plan.get("broker_operations") and not args.json:
+            options["approve_permissions"] = approve
+        return installer.apply(plan, wheel, inventory, **options)
 
 
 def rollback(args, installer: Installer) -> int:

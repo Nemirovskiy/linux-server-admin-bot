@@ -39,6 +39,7 @@ class DistributionInfo:
     author: str | None = None
     license: str | None = None
     origin: str | None = None
+    artifact_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class PluginDescriptor:
     entry: EntryPoint | None = field(default=None, compare=False, repr=False)
     module_file: Path | None = None
     data_schema_version: int = 1
+    broker_operations: dict = field(default_factory=dict)
 
     @property
     def actions(self) -> tuple[str, ...]:

@@ -212,3 +212,71 @@ def test_shared_distribution_cannot_be_removed_as_one_block(stage, monkeypatch):
     monkeypatch.setattr(installer, "_inventory", lambda *_args: inventory)
     with pytest.raises(ValueError, match="multiple blocks"):
         installer.remove("demo", dry_run=True)
+
+
+def test_removal_requires_revocation_and_restores_previous_environment_on_failure(stage, monkeypatch):
+    installer, _, management, base, candidate, _ = stage
+    record = {
+        "id": "demo",
+        "distribution": "demo-package",
+        "version": "1.0",
+        "required": ["demo.metrics.read"],
+        "optional": [],
+        "source": "external",
+    }
+    (base / "lsab-installed-plugins.json").write_text(
+        json.dumps({"demo": {"broker_operations": {"demo.metrics.read": {}}}})
+    )
+    inventory = {
+        "catalog": [record],
+        "packages": {"demo-package": "1.0"},
+        "defaults": {"demo": False},
+    }
+    monkeypatch.setattr(installer, "_inventory", lambda *_: inventory)
+    monkeypatch.setattr(installer, "_guard", lambda: None)
+
+    def clone(*_):
+        candidate.mkdir(exist_ok=True)
+        (candidate / "pyvenv.cfg").touch()
+        return candidate
+
+    monkeypatch.setattr(installer, "_clone", clone)
+    monkeypatch.setattr(installer, "_validate", Mock(return_value={"enabled": []}))
+    monkeypatch.setattr("cli.installer.pip", Mock())
+    management._wait_ready = Mock()
+    revoke = Mock()
+    monkeypatch.setattr("cli.installer.revoke", revoke)
+    assert installer.remove("demo", dry_run=True)["revoke_broker_permissions"]
+    revoke.assert_not_called()
+    revoke.side_effect = ValueError("Could not revoke broker rights")
+    with pytest.raises(ServiceError, match="Previous environment restored"):
+        installer.remove("demo")
+    assert installer.active == base
+    assert installer.config.is_enabled("demo")
+    revoke.reset_mock()
+    revoke.side_effect = None
+    assert installer.remove("demo")["status"] == "completed"
+    revoke.assert_called_once_with("demo")
+    assert installer.active == candidate
+
+
+def test_recovery_finishes_pending_broker_revocations(stage, monkeypatch):
+    installer, _, _, base, candidate, original = stage
+    monkeypatch.setattr(installer, "_guard", lambda: None)
+    installer._link("current", candidate)
+    txn = installer._transaction("remove", "demo", base)
+    txn.update(
+        candidate=str(candidate),
+        config=str(installer.config.path),
+        backend="systemd",
+        after=original,
+        pending_broker_revocations=["demo"],
+    )
+    installer._save(txn, "applying")
+    revoke = Mock()
+    monkeypatch.setattr("cli.installer.revoke", revoke)
+    assert installer.recover()["status"] == "completed"
+    assert installer.active == candidate
+    revoke.assert_called_once_with("demo")
+    with pytest.raises(ValueError, match="No interrupted activation"):
+        installer.recover()

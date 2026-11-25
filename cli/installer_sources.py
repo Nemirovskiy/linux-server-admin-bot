@@ -233,6 +233,7 @@ def inspect_wheel(wheel: Path, source: Source) -> dict:
             "sha256": sha256(wheel),
             "required": list(required),
             "optional": list(optional),
+            "broker_operations": descriptor.broker_operations,
             "schema": schema,
             "dependencies": metadata.get_all("Requires-Dist", []),
             "api": PLUGIN_API_VERSION,

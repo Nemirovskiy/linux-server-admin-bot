@@ -12,6 +12,7 @@ from typing import Any
 
 from broker.actions import ACTIONS, DOCKER, OWNERS, Action
 from broker.executor import executable, run_command
+from broker.operations import check_executable, cli_command
 from broker.policy import POLICY_PATH, Policy, load_policy
 from broker.protocol import MAX_RESULT, VERSION, BrokerError, Request, json_bytes
 from broker.security import Caller, sudo_caller, trusted
@@ -61,9 +62,9 @@ def _control(request: Request, policy: Policy) -> Any:
     if request.params:
         raise BrokerError("INVALID_PARAMS", "This diagnostic accepts no parameters.")
     if request.action == "broker.status":
-        return {"protocol_version": VERSION, "mode": "sudo"}
+        return {"protocol_version": VERSION, "mode": "sudo", "external_operations": True}
     if request.action == "broker.actions":
-        return [
+        builtin = [
             {
                 "id": name,
                 "plugin": action.plugin,
@@ -73,7 +74,12 @@ def _control(request: Request, policy: Policy) -> Any:
             }
             for name, action in ACTIONS.items()
         ]
-    return {
+        return builtin + [
+            _external_action(plugin, name, spec)
+            for plugin, record in sorted(policy.external.items())
+            for name, spec in sorted(record["operations"].items())
+        ]
+    grants = {
         name: {
             "enabled": grant.enabled,
             "allow": sorted(grant.allow) if grant.enabled else [],
@@ -81,22 +87,71 @@ def _control(request: Request, policy: Policy) -> Any:
         }
         for name, grant in policy.plugins.items()
     }
+    grants.update(
+        {
+            name: {
+                "enabled": True,
+                "allow": sorted(record["operations"]),
+                "sha256": record["sha256"],
+            }
+            for name, record in policy.external.items()
+        }
+    )
+    return grants
+
+
+def _external_action(plugin: str, name: str, spec: dict) -> dict:
+    docker = ACTIONS.get(spec.get("docker_action"))
+    if docker is not None:
+        parameter = docker.params
+        available = _available(docker)
+    else:
+        parameter = ", ".join(sorted(spec["parameters"]))
+        try:
+            check_executable(spec)
+            available = True
+        except (BrokerError, ValueError):
+            available = False
+    return {
+        "id": name,
+        "plugin": plugin,
+        "mutates": docker.mutates if docker else True,
+        "parameter": parameter or None,
+        "executable_available": available,
+    }
 
 
 def _execute(request: Request, policy: Policy, runner: Callable) -> Any:
     if request.plugin_id == "broker" and request.action in _CONTROL:
         return _control(request, policy)
+    if request.artifact is not None or request.plugin_id in policy.external:
+        record = policy.external.get(request.plugin_id)
+        if record is None or request.artifact != record["sha256"]:
+            raise BrokerError("PERMISSION_DENIED", "No approval for this plugin artifact.")
+        spec = record["operations"].get(request.action)
+        if spec is None:
+            raise BrokerError("PERMISSION_DENIED", "This operation was not approved.")
+        if "argv" in spec:
+            argv = cli_command(spec, request.params)
+            check_executable(spec)
+            return runner(argv, 8).decode("utf-8", errors="replace")
+        return _docker(spec["docker_action"], request.params, spec["containers"], runner)
     action = ACTIONS.get(request.action)
     if action is None:
         raise BrokerError("UNKNOWN_ACTION", "The requested action is not registered.")
     if action.plugin != request.plugin_id:
         raise BrokerError("PERMISSION_DENIED", "The action is not assigned to this plugin.")
     grant = policy.authorize(request.plugin_id, request.action)
-    argv = action.command(request.params)
-    container_id = request.params.get("container_id")
+    return _docker(request.action, request.params, grant.containers, runner)
+
+
+def _docker(name: str, params: dict, containers, runner: Callable) -> Any:
+    action = ACTIONS[name]
+    argv = action.command(params)
+    container_id = params.get("container_id")
     if (
-        action.mutates or (container_id is not None and grant.containers)
-    ) and container_id not in grant.containers:
+        action.mutates or (container_id is not None and containers)
+    ) and container_id not in containers:
         raise BrokerError(
             "PERMISSION_DENIED", "This container ID is outside the granted allowlist."
         )
@@ -111,12 +166,12 @@ def _execute(request: Request, policy: Policy, runner: Callable) -> Any:
                 )
             return action.output(runner(argv, action.timeout))
     data = action.output(runner(argv, action.timeout))
-    if request.action == "docker.containers.inspect" and data["id"] != container_id:
+    if name == "docker.containers.inspect" and data["id"] != container_id:
         raise BrokerError(
             "PERMISSION_DENIED", "The Docker target no longer matches the requested ID."
         )
-    if request.action == "docker.containers.read" and grant.containers:
-        data = [row for row in data if row["id"] in grant.containers]
+    if name == "docker.containers.read" and containers:
+        data = [row for row in data if row["id"] in containers]
     return data
 
 
@@ -153,11 +208,7 @@ def dispatch(
             "system_user": caller.user if caller else None,
             "system_uid": caller.uid if caller else None,
             "claimed_plugin_id": request.plugin_id if request else None,
-            "action": (
-                request.action
-                if request and (request.action in ACTIONS or request.action in _CONTROL)
-                else None
-            ),
+            "action": (request.action if request else None),
             "result": result,
             "duration_ms": int((time.monotonic() - start) * 1000),
         }

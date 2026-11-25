@@ -8,6 +8,7 @@ from logging import getLogger
 from typing import TYPE_CHECKING
 
 from bot.api import PluginDefinitionError
+from bot.broker_client import BrokerClient
 from bot.commands import CORE_COMMANDS
 from bot.plugins.config import PluginConfig
 from bot.plugins.loader import PluginLoader
@@ -174,15 +175,30 @@ class PluginManager:
         descriptor = record.descriptor
         if descriptor is None:
             return
-        if descriptor.source == "external" and descriptor.required_permissions:
-            permissions = ", ".join(descriptor.required_permissions)
-            self._update_health(
-                record,
-                f"Required broker permissions unavailable for external plugins: {permissions}",
-            )
-            return
         try:
-            record.instance = self.loader.create_instance(descriptor, self.context_factory)
+            factory = self.context_factory
+            if descriptor.source == "external" and descriptor.required_permissions:
+                context = factory(descriptor)
+                available = (
+                    context.broker.permissions
+                    if isinstance(context.broker, BrokerClient)
+                    else frozenset()
+                )
+                missing = set(descriptor.required_permissions) - available
+                if missing:
+                    permissions = ", ".join(sorted(missing))
+                    self._update_health(
+                        record,
+                        f"Required broker permissions unavailable for external plugins: {permissions}",
+                    )
+                    return
+
+                def approved_context(_descriptor: PluginDescriptor) -> PluginContext:
+                    return context
+
+                factory = approved_context
+
+            record.instance = self.loader.create_instance(descriptor, factory)
             record.state = PluginState.LOADED
         except Exception as exc:
             self._fail(record, "load", exc)

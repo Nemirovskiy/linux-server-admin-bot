@@ -8,7 +8,7 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +28,7 @@ from cli.installer_sources import (
     sha256,
 )
 from cli.management import PluginManagement
+from cli.plugin_permissions import revoke
 from cli.services import ServiceController, ServiceError
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
@@ -248,7 +249,13 @@ class Installer:
         )
 
     def apply(
-        self, plan: dict, wheel: Path, inventory: dict, *, allow_migration: bool = False
+        self,
+        plan: dict,
+        wheel: Path,
+        inventory: dict,
+        *,
+        allow_migration: bool = False,
+        approve_permissions: Callable[[dict], str] | None = None,
     ) -> dict:
         key = plan["id"]
         if plan["schema_changed"] and not allow_migration:
@@ -303,13 +310,14 @@ class Installer:
                         str(cached),
                     )
                 records = self._records(base)
+                previous = records.get(key, {})
                 records[key] = {**plan, "installed_at": _now()}
                 _write(candidate / "lsab-installed-plugins.json", records)
                 txn["records_before"] = self._records(base)
                 txn["records_after"] = records
-                revision = self._revision(
-                    candidate, {key: False} if plan["operation"] == "install" else {}
-                )
+                uses_broker = plan.get("broker_operations") or previous.get("broker_operations")
+                switches = {key: False} if plan["operation"] == "install" or uses_broker else {}
+                revision = self._revision(candidate, switches)
                 checked = self._validate(candidate, revision, inventory, plan["distribution"])
                 row = self._installed(checked).get(key)
                 if not row or row["state"] == "failed" or row["version"] != plan["version"]:
@@ -320,12 +328,23 @@ class Installer:
                     revision,
                     checked,
                     backup=key if plan["schema_changed"] else None,
+                    revoke_plugins=(key,) if previous.get("broker_operations") else (),
                 )
             except BaseException:
                 self._failed(txn)
                 raise
             self._prune()
-            return self._public(txn)
+            return self._installation_result(txn, plan, approve_permissions)
+
+    def _installation_result(
+        self, txn: dict, plan: dict, approve_permissions: Callable[[dict], str] | None
+    ) -> dict:
+        result = self._public(txn)
+        if plan.get("broker_operations"):
+            result["broker_approval"] = (
+                approve_permissions(plan) if approve_permissions else "approval_required"
+            )
+        return result
 
     def remove(self, plugin_id: str, *, dry_run: bool = False, purge: bool = False) -> dict:
         inventory = self._inventory(self.active)
@@ -333,6 +352,7 @@ class Installer:
         if not old:
             raise ValueError(f"Unknown external plugin: {plugin_id}")
         name = canonicalize_name(old["distribution"])
+        managed = self._records(self.active).get(plugin_id, {})
         self._single_block(inventory, plugin_id, name)
         plan = {
             "operation": "remove",
@@ -341,6 +361,7 @@ class Installer:
             "previous_version": old["version"],
             "purge": purge,
             "permissions": old["required"] + old["optional"],
+            "revoke_broker_permissions": bool(managed.get("broker_operations")),
         }
         if dry_run:
             return plan
@@ -363,6 +384,7 @@ class Installer:
                 _write(candidate / "lsab-installed-plugins.json", records)
                 revision = self._revision(candidate, {plugin_id: False})
                 checked = self._validate(candidate, revision, inventory, name)
+                revoked = bool(txn["records_before"].get(plugin_id, {}).get("broker_operations"))
                 self._activate(
                     txn,
                     candidate,
@@ -370,6 +392,7 @@ class Installer:
                     checked,
                     backup=plugin_id if purge else None,
                     purge=purge,
+                    revoke_plugins=(plugin_id,) if revoked else (),
                 )
             except BaseException:
                 self._failed(txn)
@@ -392,11 +415,28 @@ class Installer:
                     raise ValueError(
                         "Data schema differs; restore the documented data backup before rolling back"
                     )
-            revision = self._revision(previous, dict.fromkeys(now.keys() - then.keys(), False))
+            prior_records = self._records(previous)
+            current_records = self._records(base)
+            changed_rights = {
+                key
+                for key, record in (prior_records | current_records).items()
+                if prior_records.get(key, {}).get("sha256")
+                != current_records.get(key, {}).get("sha256")
+                and (
+                    record.get("broker_operations")
+                    or prior_records.get(key, {}).get("broker_operations")
+                )
+            }
+            revision = self._revision(
+                previous, dict.fromkeys((now.keys() - then.keys()) | changed_rights, False)
+            )
             checked = self._validate(previous, revision)
             txn = self._transaction("rollback", None, base)
             try:
-                self._activate(txn, previous, revision, checked)
+                self._activate(
+                    txn, previous, revision, checked,
+                    revoke_plugins=tuple(sorted(changed_rights & current_records.keys())),
+                )
             except BaseException:
                 self._failed(txn)
                 raise
@@ -474,12 +514,12 @@ class Installer:
             raise ValueError("Candidate configuration failed checks: " + details)
         return after
 
-    def _activate(self, txn, candidate, revision, inventory, *, backup=None, purge=False):
+    def _activate(self, txn, candidate, revision, inventory, **options):
         if self.controller.kind == "manual":
             with self._manual_guard():
-                self._switch(txn, candidate, revision, inventory, backup=backup, purge=purge)
+                self._switch(txn, candidate, revision, inventory, **options)
         else:
-            self._switch(txn, candidate, revision, inventory, backup=backup, purge=purge)
+            self._switch(txn, candidate, revision, inventory, **options)
 
     @contextmanager
     def _manual_guard(self):
@@ -492,7 +532,9 @@ class Installer:
                 ) from exc
             yield
 
-    def _switch(self, txn, candidate, revision, inventory, *, backup=None, purge=False):
+    def _switch(
+        self, txn, candidate, revision, inventory, *, backup=None, purge=False, revoke_plugins=()
+    ):
         if self.config.snapshot() != revision.original:
             raise ValueError("Configuration changed during preparation")
         running, runtime = self._running_service()
@@ -531,9 +573,11 @@ class Installer:
             if purge:
                 self._purge(backup)
             self._link("previous", Path(txn["previous"]))
-            self._save(txn, "completed")
+            self._complete_switch(txn, revoke_plugins)
         except BaseException as exc:
             try:
+                if txn.pop("pending_broker_revocations", None):
+                    self._save(txn, "applying")
                 self._restore(txn)
             except Exception as recovery:
                 self._save(txn, "recovery_required")
@@ -543,6 +587,15 @@ class Installer:
             raise ServiceError(
                 f"Package activation failed: {exc}. Previous environment restored."
             ) from exc
+
+    def _complete_switch(self, txn: dict, revoke_plugins) -> None:
+        if revoke_plugins:
+            txn["pending_broker_revocations"] = list(revoke_plugins)
+            self._save(txn, "applying")
+            for plugin in revoke_plugins:
+                revoke(plugin)
+            del txn["pending_broker_revocations"]
+        self._save(txn, "completed")
 
     def _running_service(self) -> tuple[bool, dict | None]:
         service = self.controller.status()
@@ -607,7 +660,10 @@ class Installer:
         with self.lock():
             for txn in self._read_history():
                 if txn["status"] in {"applying", "recovery_required"}:
-                    if self.controller.kind == "manual":
+                    pending = txn.get("pending_broker_revocations")
+                    if pending:
+                        self._recover_revocations(txn, pending)
+                    elif self.controller.kind == "manual":
                         with self._manual_guard():
                             if read_status(self.management.directory):
                                 raise ServiceError(
@@ -619,6 +675,16 @@ class Installer:
                     self._prune()
                     return self._public(txn)
             raise ValueError("No interrupted activation to recover")
+
+    def _recover_revocations(self, txn: dict, pending: list[str]) -> None:
+        if (
+            Path(txn["config"]) != self.config.path
+            or txn["backend"] != self.controller.kind
+            or Path(txn["candidate"]) != self.active
+            or txn["after"] != self.config.snapshot()
+        ):
+            raise ValueError("Restore the interrupted transaction's environment and configuration first")
+        self._complete_switch(txn, pending)
 
     def _data_paths(self, key: str) -> tuple[Path, Path]:
         base = self.config.path.parent

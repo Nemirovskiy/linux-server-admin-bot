@@ -143,9 +143,8 @@ def _editable_files(
     raise ValueError("Editable plugin must use a flat or src layout with a local manifest")
 
 
-def _origin(dist: Distribution) -> str | None:
+def _origin(data: dict) -> str | None:
     try:
-        data = json.loads(dist.read_text("direct_url.json") or "{}")
         url = urlsplit(data["url"])
         if url.scheme not in {"file", "http", "https", "ssh", "git"}:
             return None
@@ -155,6 +154,20 @@ def _origin(dist: Distribution) -> str | None:
         return None
 
 
+def _artifact_sha256(data: dict) -> str | None:
+    from broker.protocol import CONTAINER_ID
+
+    archive = data.get("archive_info")
+    if not isinstance(archive, dict):
+        return None
+    hashes = archive.get("hashes")
+    digest = hashes.get("sha256") if isinstance(hashes, dict) else None
+    if digest is None and isinstance(archive.get("hash"), str):
+        algorithm, _, value = archive["hash"].partition("=")
+        digest = value if algorithm == "sha256" else None
+    return digest if isinstance(digest, str) and CONTAINER_ID.fullmatch(digest) else None
+
+
 def _distribution(dist: Distribution) -> DistributionInfo:
     metadata = dist.metadata
     name = metadata.get("Name")
@@ -162,6 +175,12 @@ def _distribution(dist: Distribution) -> DistributionInfo:
     if not name or not installed_version:
         raise ValueError("Distribution name or version is missing")
     Version(installed_version)
+    try:
+        direct = json.loads(dist.read_text("direct_url.json") or "{}")
+    except (OSError, ValueError, RecursionError):
+        direct = {}
+    if not isinstance(direct, dict):
+        direct = {}
     return DistributionInfo(
         name=name,
         version=installed_version,
@@ -169,7 +188,8 @@ def _distribution(dist: Distribution) -> DistributionInfo:
         requires_dist=tuple(dist.requires or ()),
         author=metadata.get("Author") or metadata.get("Author-email"),
         license=metadata.get("License-Expression") or metadata.get("License"),
-        origin=_origin(dist),
+        origin=_origin(direct),
+        artifact_sha256=_artifact_sha256(direct),
     )
 
 
@@ -248,7 +268,7 @@ def _storage_schema(data: dict) -> int:
 def _descriptor(
     data: dict, entry: EntryPoint, distribution: DistributionInfo, module_file: Path
 ) -> PluginDescriptor:
-    if set(data) - {"plugin", "permissions", "compatibility", "data"} or not isinstance(
+    if set(data) - {"plugin", "permissions", "compatibility", "data", "broker"} or not isinstance(
         data.get("plugin"), dict
     ):
         raise ValueError("Expected a [plugin] manifest table")
@@ -285,4 +305,20 @@ def _descriptor(
         entry=entry,
         module_file=module_file,
         data_schema_version=schema,
+        broker_operations=_broker_operations(
+            data.get("broker", {}), entry.name, required + optional
+        ),
     )
+
+
+def _broker_operations(broker: object, plugin: str, permissions: tuple[str, ...]) -> dict:
+    from broker.operations import operations
+
+    if not isinstance(broker, dict) or set(broker) - {"operations"}:
+        raise ValueError("Expected a broker operations table")
+    if "operations" not in broker:
+        return {}
+    definitions = operations(plugin, broker["operations"])
+    if set(definitions) - set(permissions):
+        raise ValueError("Broker operations must be declared as required or optional")
+    return definitions

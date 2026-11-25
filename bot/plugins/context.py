@@ -1,13 +1,16 @@
 """Build the scoped services available to each plugin."""
 
+import json
+import sys
 import tomllib
 from logging import getLogger
 from pathlib import Path
 
 from bot.api import AlertProtocol, NullBroker, PluginContext, SystemProtocol
-from bot.broker_client import BrokerClient
+from bot.broker_client import BrokerClient, broker_grants
 from bot.plugins.models import PluginDescriptor
 from broker.transport import SudoTransport, Transport
+from packaging.utils import canonicalize_name
 
 
 class PluginContextFactory:
@@ -19,30 +22,61 @@ class PluginContextFactory:
         *,
         config_path: Path | None = None,
         create_data: bool = True,
+        environment: Path | None = None,
     ) -> None:
         self.system = system
         self.alerts = alerts
         self.transport = transport
         self.config_path = config_path
         self.create_data = create_data
+        self.environment = environment or Path(sys.prefix)
 
     def __call__(self, descriptor: PluginDescriptor) -> PluginContext:
-        metadata = descriptor.metadata
         config, data_dir = self._paths(descriptor)
-        broker = (
-            BrokerClient(metadata.id, self.transport, frozenset(metadata.permissions))
-            if self.transport is not None and metadata.permissions and descriptor.source == "builtin"
-            else NullBroker()
-        )
         return PluginContext(
             plugin_id=descriptor.metadata.id,
             config=config,
             logger=getLogger(descriptor.entry_point.partition(":")[0]),
             system=self.system,
             alerts=self.alerts,
-            broker=broker,
+            broker=self._broker(descriptor),
             data_dir=data_dir,
         )
+
+    def _broker(self, descriptor: PluginDescriptor):
+        metadata = descriptor.metadata
+        if self.transport is None or not metadata.permissions:
+            return NullBroker()
+        if descriptor.source == "builtin":
+            return BrokerClient(metadata.id, self.transport, frozenset(metadata.permissions))
+        if not descriptor.broker_operations or descriptor.distribution is None:
+            return NullBroker()
+        try:
+            path = self.environment / "lsab-installed-plugins.json"
+            record = json.loads(path.read_text())[metadata.id]
+            artifact = record["sha256"]
+            if (
+                record["source"]["editable"]
+                or artifact != descriptor.distribution.artifact_sha256
+                or record["distribution"] != canonicalize_name(descriptor.distribution.name)
+                or record["version"] != metadata.version
+                or record["broker_operations"] != descriptor.broker_operations
+            ):
+                return NullBroker()
+        except (OSError, ValueError, KeyError, TypeError):
+            return NullBroker()
+        grants = broker_grants(self.transport)
+        if not grants.success or not isinstance(grants.data, dict):
+            return NullBroker()
+        grant = grants.data.get(metadata.id)
+        if (
+            not isinstance(grant, dict)
+            or grant.get("sha256") != artifact
+            or not isinstance(grant.get("allow"), list)
+        ):
+            return NullBroker()
+        available = frozenset(descriptor.broker_operations).intersection(grant["allow"])
+        return BrokerClient(metadata.id, self.transport, available, artifact)
 
     def _paths(self, descriptor: PluginDescriptor) -> tuple[dict, Path | None]:
         if self.config_path is None:

@@ -67,6 +67,7 @@ class Request:
     plugin_id: str
     action: str
     params: dict[str, Any]
+    artifact: str | None = None
 
     @classmethod
     def parse(cls, raw: bytes) -> "Request":
@@ -77,7 +78,7 @@ class Request:
         except (ValueError, RecursionError) as exc:
             raise BrokerError("INVALID_PARAMS", "Invalid JSON request.") from exc
         fields = {"request_id", "plugin_id", "action", "params", "protocol_version"}
-        if not isinstance(data, dict) or set(data) != fields:
+        if not isinstance(data, dict) or set(data) - {"artifact"} != fields:
             raise BrokerError("INVALID_PARAMS", "Invalid request fields.")
         version = data["protocol_version"]
         if not isinstance(version, int) or isinstance(version, bool) or version != VERSION:
@@ -92,7 +93,15 @@ class Request:
                 raise BrokerError("INVALID_PARAMS", f"Invalid {name}.")
         if not isinstance(data["params"], dict):
             raise BrokerError("INVALID_PARAMS", "Parameters must be an object.")
-        return cls(data["request_id"], data["plugin_id"], data["action"], data["params"])
+        artifact = data.get("artifact")
+        if "artifact" in data and (
+            not isinstance(artifact, str) or not CONTAINER_ID.fullmatch(artifact)
+        ):
+            raise BrokerError("INVALID_PARAMS", "Invalid artifact digest.")
+        return cls(data["request_id"], data["plugin_id"], data["action"], data["params"], artifact)
 
     def encode(self) -> bytes:
-        return json_bytes({"protocol_version": VERSION, **vars(self)})
+        fields = {"protocol_version": VERSION, **vars(self)}
+        if self.artifact is None:
+            del fields["artifact"]
+        return json_bytes(fields)

@@ -2,18 +2,24 @@
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from broker.protocol import CONTAINER_ID, IDENTIFIER, BrokerError
+from broker.operations import operations
+from broker.protocol import CONTAINER_ID, IDENTIFIER, BrokerError, json_loads
 from broker.security import Caller, trusted
 
 POLICY_PATH = Path("/etc/lsab/broker/permissions.toml")
 MAX_POLICY = 64 * 1024
 # Parse old CrowdSec grants without exposing any of the retired actions.
 _RETIRED_CROWDSEC_OWNERS = dict.fromkeys(
-    ("crowdsec.status.read", "crowdsec.alerts.read", "crowdsec.decisions.read", "crowdsec.bouncers.read"),
+    (
+        "crowdsec.status.read",
+        "crowdsec.alerts.read",
+        "crowdsec.decisions.read",
+        "crowdsec.bouncers.read",
+    ),
     "crowdsec",
 )
 
@@ -29,11 +35,12 @@ class Grant:
 class Policy:
     callers: frozenset[int]
     plugins: dict[str, Grant]
+    external: dict[str, dict] = field(default_factory=dict)
 
     @classmethod
     def parse(cls, raw: bytes, owners: dict[str, str]) -> "Policy":
         document = tomllib.loads(raw.decode("utf-8"))
-        if set(document) - {"policy", "plugins"}:
+        if set(document) - {"policy", "plugins", "external"}:
             raise ValueError("Unknown policy section")
         settings = document.get("policy")
         if not isinstance(settings, dict) or set(settings) != {"version", "default", "caller_uids"}:
@@ -60,7 +67,19 @@ class Policy:
                 _grant(name, fields, _RETIRED_CROWDSEC_OWNERS)
             else:
                 grants[name] = _grant(name, fields, owners)
-        return cls(frozenset(uids), grants)
+        external = document.get("external", {})
+        if not isinstance(external, dict) or any(
+            not isinstance(record, str) for record in external.values()
+        ):
+            raise ValueError("Invalid external grants")
+        return cls(
+            frozenset(uids),
+            grants,
+            {
+                plugin: external_grant(plugin, json_loads(value.encode("ascii")))
+                for plugin, value in external.items()
+            },
+        )
 
     def authorize_caller(self, caller: Caller) -> None:
         if caller.uid not in self.callers:
@@ -100,6 +119,16 @@ def _grant(name: str, fields: Any, owners: dict[str, str]) -> Grant:
     if containers and name != "docker":
         raise ValueError("Container restrictions are only supported for Docker")
     return Grant(enabled, frozenset(allow), frozenset(containers))
+
+
+def external_grant(plugin: str, record: object) -> dict:
+    if not isinstance(record, dict) or set(record) != {"sha256", "operations"}:
+        raise ValueError("Invalid external grant")
+    digest = record["sha256"]
+    if not isinstance(digest, str) or not CONTAINER_ID.fullmatch(digest):
+        raise ValueError("Invalid wheel SHA256")
+    operations(plugin, record["operations"], approved=True)
+    return record
 
 
 def load_policy(path: Path, owners: dict[str, str]) -> Policy:

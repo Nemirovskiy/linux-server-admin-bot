@@ -200,9 +200,7 @@ async def test_scoped_broker_client_async_and_null():
     result = await client.execute("docker.containers.read", {})
     assert result.success and result.data == []
     assert (await client.execute("docker.containers.restart", {})).code == "PERMISSION_DENIED"
-    assert (
-        client.execute_sync("docker.containers.read", {}).code == "BROKER_UNAVAILABLE"
-    )
+    assert client.execute_sync("docker.containers.read", {}).code == "BROKER_UNAVAILABLE"
     assert (await NullBroker().execute("docker.containers.read", {})).code == "BROKER_UNAVAILABLE"
     transport.exchange.assert_called_once()
 
@@ -296,3 +294,145 @@ def test_docker_executor_rejects_nonempty_configuration_before_spawning(tmp_path
         run_command((*DOCKER, "container", "ls"), 1)
     assert failure.value.code == "INVALID_POLICY"
     spawn.assert_not_called()
+
+
+def test_external_command_uses_approved_artifact_and_typed_args(worker, monkeypatch):
+    from dataclasses import replace
+
+    from broker.admin import _format
+
+    action = "crowdsec.decisions.list"
+    spec = {
+        "argv": ["/usr/bin/cscli", "decisions", "list", "--since", "{hours}h"],
+        "parameters": {"hours": {"min": 1, "max": 168}},
+    }
+    policy = replace(
+        make_policy(),
+        external={"crowdsec": {"sha256": ID, "operations": {action: spec}}},
+    )
+    policy = Policy.parse(_format(policy), OWNERS)
+    monkeypatch.setattr("broker.operations.executable", lambda path: path)
+    for hours in (24, 48):
+        result, runner, _ = worker(
+            Request(REQUEST_ID, "crowdsec", action, {"hours": hours}, ID).encode(),
+            policy=policy,
+            output=b"decisions",
+        )
+        assert result["data"] == "decisions"
+        runner.assert_called_once_with(
+            ("/usr/bin/cscli", "decisions", "list", "--since", f"{hours}h"), 8
+        )
+    for params in (
+        {"hours": True},
+        {"hours": 169},
+        {"hours": "--config"},
+        {"hours": 24, "argv": []},
+    ):
+        result, runner, _ = worker(
+            Request(REQUEST_ID, "crowdsec", action, params, ID).encode(), policy=policy
+        )
+        assert result["code"] == "INVALID_PARAMS"
+        runner.assert_not_called()
+    for artifact, active_policy in ((OTHER_ID, policy), (None, policy), (ID, make_policy())):
+        result, runner, _ = worker(
+            Request(REQUEST_ID, "crowdsec", action, {"hours": 24}, artifact).encode(),
+            policy=active_policy,
+        )
+        assert result["code"] == "PERMISSION_DENIED"
+        runner.assert_not_called()
+
+
+def test_external_docker_alias_keeps_container_scope(worker, monkeypatch):
+    from dataclasses import replace
+
+    action = "demo.docker.restart"
+    policy = replace(
+        make_policy(),
+        external={
+            "demo": {
+                "sha256": ID,
+                "operations": {
+                    action: {"docker_action": "docker.containers.restart", "containers": [ID]},
+                },
+            },
+        },
+    )
+    monkeypatch.setattr("broker.worker.mutation_lock", nullcontext)
+    result, runner, _ = worker(
+        Request(REQUEST_ID, "demo", action, {"container_id": ID}, ID).encode(),
+        policy=policy,
+        output=ID.encode(),
+    )
+    assert result["success"]
+    assert runner.call_args.args[0][-3:] == ("container", "restart", ID)
+    result, runner, _ = worker(
+        Request(REQUEST_ID, "demo", action, {"container_id": OTHER_ID}, ID).encode(), policy=policy
+    )
+    assert result["code"] == "PERMISSION_DENIED"
+    runner.assert_not_called()
+
+
+def test_external_approval_requires_terminal_confirmation_and_can_be_revoked(tmp_path, monkeypatch):
+    import io
+
+    from broker.admin import _format, administer
+    from broker.policy import load_policy
+
+    path = tmp_path / "permissions.toml"
+    path.write_bytes(_format(make_policy()))
+    monkeypatch.setattr("broker.admin.POLICY_PATH", path)
+    monkeypatch.setattr("broker.admin.trusted", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("broker.policy.trusted", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("broker.operations.executable", lambda path: path)
+    operation = "demo.status.read"
+    proposal = json.dumps({"sha256": ID, "operations": {
+        operation: {"argv": ["/usr/bin/cscli", "version"], "parameters": {}},
+    }})
+    response = ["no"]
+    monkeypatch.setattr("broker.admin.open", lambda *_args, **_kwargs: io.StringIO(response[0]), raising=False)
+    args = ["approve-external", "demo", "--proposal", proposal]
+    assert administer(args) == 2
+    assert not load_policy(path, OWNERS).external
+    response[0] = "approve"
+    assert administer(args) == 0
+    assert operation in load_policy(path, OWNERS).external["demo"]["operations"]
+    assert administer(["revoke-external", "demo"]) == 0
+    assert not load_policy(path, OWNERS).external
+
+
+def test_external_context_requires_matching_installed_wheel(tmp_path):
+    from dataclasses import replace
+
+    from bot.api import PluginMetadata
+    from bot.plugins.context import PluginContextFactory
+    from bot.plugins.models import DistributionInfo, PluginDescriptor
+
+    action = "demo.status.read"
+    operations = {action: {"argv": ["/usr/bin/cscli", "version"], "parameters": {}}}
+    descriptor = PluginDescriptor(
+        metadata=PluginMetadata("demo", "Demo", "Demo", "1.0", "1.1", permissions=(action,)),
+        source="external",
+        entry_point="demo:Block",
+        distribution=DistributionInfo("Demo_Package", "1.0", None, (), artifact_sha256=ID),
+        required_permissions=(action,),
+        broker_operations=operations,
+    )
+    (tmp_path / "lsab-installed-plugins.json").write_text(json.dumps({"demo": {
+        "sha256": ID,
+        "version": "1.0",
+        "distribution": "demo-package",
+        "source": {"editable": False},
+        "broker_operations": operations,
+    }}))
+    policy = replace(make_policy(), external={"demo": {"sha256": ID, "operations": operations}})
+    transport = Mock()
+    transport.exchange.side_effect = lambda raw: dispatch(
+        raw, identify=lambda: Caller(1000, "bot"), policy_loader=lambda: policy, auditor=Mock()
+    )
+    factory = PluginContextFactory(Mock(), Mock(), transport, environment=tmp_path)
+    broker = factory(descriptor).broker
+    assert isinstance(broker, BrokerClient)
+    assert broker.permissions == {action}
+    assert broker.artifact == ID
+    different = replace(descriptor.distribution, artifact_sha256=OTHER_ID)
+    assert isinstance(factory(replace(descriptor, distribution=different)).broker, NullBroker)
