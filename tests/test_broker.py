@@ -372,7 +372,9 @@ def test_external_docker_alias_keeps_container_scope(worker, monkeypatch):
     runner.assert_not_called()
 
 
-def test_external_approval_requires_terminal_confirmation_and_can_be_revoked(tmp_path, monkeypatch):
+def test_external_approval_requires_terminal_confirmation_and_can_be_revoked(
+    tmp_path, monkeypatch, capsys
+):
     import io
 
     from broker.admin import _format, administer
@@ -384,15 +386,29 @@ def test_external_approval_requires_terminal_confirmation_and_can_be_revoked(tmp
     monkeypatch.setattr("broker.admin.trusted", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("broker.policy.trusted", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("broker.operations.executable", lambda path: path)
+    monkeypatch.setattr(
+        "broker.admin.run_command",
+        lambda *_: json.dumps({"ID": ID, "Names": "web"}).encode(),
+    )
     operation = "demo.status.read"
-    proposal = json.dumps({"sha256": ID, "operations": {
-        operation: {"argv": ["/usr/bin/cscli", "version"], "parameters": {}},
-    }})
+    proposal = json.dumps({
+        "sha256": ID,
+        "operations": {
+            operation: {"argv": ["/usr/bin/cscli", "version"], "parameters": {}},
+            "demo.restart": {"docker_action": "docker.containers.restart", "containers": [ID]},
+        },
+    })
     response = ["no"]
     monkeypatch.setattr("broker.admin.open", lambda *_args, **_kwargs: io.StringIO(response[0]), raising=False)
     args = ["approve-external", "demo", "--proposal", proposal]
     assert administer(args) == 2
     assert not load_policy(path, OWNERS).external
+    stderr = capsys.readouterr().err
+    assert f"Wheel SHA-256: {ID}" in stderr
+    assert f"'web' ({ID})" in stderr
+    assert "Restart the selected Docker containers" in stderr
+    assert "/usr/bin/cscli version" in stderr
+    assert '"operations"' not in stderr
     response[0] = "approve"
     assert administer(args) == 0
     assert operation in load_policy(path, OWNERS).external["demo"]["operations"]

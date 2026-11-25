@@ -1,5 +1,6 @@
 import fcntl
 import json
+from pathlib import Path
 from unittest.mock import Mock
 from zipfile import ZipFile
 
@@ -8,9 +9,151 @@ import pytest
 from bot.plugins.config import PluginConfig
 from bot.runtime_status import config_digest
 from cli.installer import Installer
-from cli.installer_sources import inspect_wheel, resolve
+from cli.installer_sources import Source, inspect_wheel, resolve
 from cli.management import PluginManagement
 from cli.services import ServiceError
+
+
+@pytest.fixture
+def cli_plan(monkeypatch):
+    from cli.main import parser
+
+    source = Source("index", "demo-package==2.0")
+    plan = {
+        "id": "demo",
+        "version": "2.0",
+        "previous_version": "1.0",
+        "operation": "update",
+        "base": "/test-env",
+        "source": vars(source),
+        "packages": [],
+        "schema_changed": False,
+        "new_permissions": [],
+        "sha256": "a" * 64,
+        "required": ["demo.decisions.read"],
+        "broker_operations": {
+            "demo.decisions.read": {
+                "argv": ["/usr/bin/cscli", "decisions", "list", "--since", "{hours}h"],
+                "parameters": {"hours": {"min": 1, "max": 168}},
+            },
+        },
+    }
+    args = parser().parse_args(["plugins", "update", "demo"])
+    installer = Mock()
+    installer.source_for.return_value = source
+    installer.prepare.return_value = plan, Path("demo.whl"), {}
+    installer._records.return_value = {"demo": {"broker_operations": {"demo.old": {}}}}
+    installer.apply.return_value = {"status": "completed", "broker_approval": "approval_required"}
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    return args, installer, plan
+
+
+def test_update_confirmation_explains_revocation_before_apply(cli_plan, monkeypatch, capsys):
+    from cli.installer_cli import run
+
+    args, installer, _ = cli_plan
+    answer = Mock(return_value="")
+    monkeypatch.setattr("builtins.input", answer)
+    with pytest.raises(ValueError, match="Operation cancelled"):
+        run(args, installer)
+    answer.assert_called_once_with("Update demo from 1.0 to 2.0? [y/N] ")
+    stderr = capsys.readouterr().err
+    assert "will revoke the previous version's broker permissions" in stderr
+    assert "will be disabled" in stderr
+    assert '"broker_operations"' not in stderr
+    installer.apply.assert_not_called()
+
+
+def test_update_preview_and_json_output(cli_plan, capsys):
+    from cli.installer_cli import run
+
+    args, installer, plan = cli_plan
+    args.dry_run = True
+    assert run(args, installer) == 0
+    stdout = capsys.readouterr().out
+    assert "Required broker permission: demo.decisions.read" in stdout
+    assert "/usr/bin/cscli decisions list --since {hours}h" in stdout
+    assert "Allowed values for hours: 1 to 168" in stdout
+    installer.apply.assert_not_called()
+
+    args.json = True
+    assert run(args, installer) == 0
+    stdout, stderr = capsys.readouterr()
+    assert json.loads(stdout) == [plan]
+    assert stderr == ""
+
+    args.dry_run = False
+    args.yes = True
+    assert run(args, installer) == 0
+    stdout, stderr = capsys.readouterr()
+    assert json.loads(stdout) == [installer.apply.return_value]
+    assert stderr == ""
+    assert "approve_permissions" not in installer.apply.call_args.kwargs
+
+
+def test_noninteractive_install_with_yes_reports_pending_permissions(cli_plan, monkeypatch, capsys):
+    from cli import plugin_permissions
+    from cli.installer_cli import run
+    from cli.main import parser
+
+    _, installer, plan = cli_plan
+    plan["operation"] = "install"
+    args = parser().parse_args(["plugins", "install", "demo-package==2.0", "--yes"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr(plugin_permissions, "HELPER", Mock())
+    monkeypatch.setattr(plugin_permissions, "ADMIN", Mock())
+    admin = Mock()
+    answer = Mock()
+    monkeypatch.setattr(plugin_permissions, "_admin", admin)
+    monkeypatch.setattr("builtins.input", answer)
+
+    def apply(plan, _wheel, _inventory, *, allow_migration, approve_permissions):
+        return {"broker_approval": approve_permissions(plan)}
+
+    installer.apply.side_effect = apply
+    assert run(args, installer) == 0
+    stdout, stderr = capsys.readouterr()
+    assert stdout.strip() == "Installed demo 2.0. The plugin is disabled."
+    assert "Broker permissions not granted: demo.decisions.read" in stderr
+    admin.assert_not_called()
+    answer.assert_not_called()
+
+
+def test_partial_broker_approval_reports_missing_required_permission(cli_plan, monkeypatch, capsys):
+    from cli import plugin_permissions
+
+    _, _, plan = cli_plan
+    target = "b" * 64
+    restart = "demo.restart"
+    plan["broker_operations"][restart] = {
+        "docker_action": "docker.containers.restart",
+        "containers": [target],
+    }
+    monkeypatch.setattr(plugin_permissions, "HELPER", Mock())
+    monkeypatch.setattr(plugin_permissions, "ADMIN", Mock())
+    answer = Mock(side_effect=["n", "y", ""])
+    monkeypatch.setattr("builtins.input", answer)
+    admin = Mock(return_value=0)
+    monkeypatch.setattr(plugin_permissions, "_admin", admin)
+    assert plugin_permissions.approve(plan) == "approved"
+    command, plugin, proposal = admin.call_args.args
+    assert (command, plugin) == ("approve-external", "demo")
+    assert json.loads(proposal) == {
+        "sha256": plan["sha256"],
+        "operations": {restart: plan["broker_operations"][restart]},
+    }
+    stderr = capsys.readouterr().err
+    assert "Restart the selected Docker containers" in stderr
+    assert target in stderr
+    assert "Broker permissions granted: demo.restart" in stderr
+    assert "The plugin cannot load without: demo.decisions.read" in stderr
+
+    admin.reset_mock()
+    answer.reset_mock()
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert plugin_permissions.approve(plan) == "approval_required"
+    admin.assert_not_called()
+    answer.assert_not_called()
 
 
 @pytest.fixture

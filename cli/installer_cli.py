@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from broker.permission_text import describe_operation
 from cli.installer import Installer
 from cli.installer_sources import Source, resolve
 from cli.output import emit, table
@@ -82,8 +83,60 @@ def _confirm(args, prompt: str) -> None:
         raise ValueError("Operation cancelled")
 
 
-def _output(args, data) -> None:
-    emit(data, as_json=args.json, text=json.dumps(data, indent=2, ensure_ascii=False))
+def _output(args, data, *, human: bool = True) -> None:
+    text = json.dumps(data, indent=2, ensure_ascii=False) if human and not args.json else ""
+    emit(data, as_json=args.json, text=text)
+
+
+def _installation_prompt(plan: dict) -> str:
+    plugin, version = plan["id"], plan["version"]
+    if plan["operation"] == "update":
+        return f"Update {plugin} from {plan['previous_version']} to {version}?"
+    return f"Install {plugin} {version}?"
+
+
+def _show_installation_plan(plan: dict, *, revoke_previous: bool, preview: bool) -> None:
+    stream = sys.stdout if preview else sys.stderr
+    if preview:
+        print("Planned change: " + _installation_prompt(plan).removesuffix("?") + ".", file=stream)
+        print(f"Wheel SHA-256: {plan['sha256']}", file=stream)
+    source = plan["source"]
+    print(f"Source ({source['kind']}): {source['value']!r}", file=stream)
+    if source["commit"]:
+        print(f"Git revision: {source['ref']} ({source['commit']})", file=stream)
+    if plan["schema_changed"]:
+        print("Data schema changes. Applying this update requires --allow-migration.", file=stream)
+    if plan["packages"]:
+        packages = ", ".join(f"{item['name']} {item['version']}" for item in plan["packages"])
+        print(f"Packages to install or replace: {packages}.", file=stream)
+    if plan["new_permissions"]:
+        print(f"New permissions declared: {', '.join(plan['new_permissions'])}.", file=stream)
+    operations = plan["broker_operations"]
+    if revoke_previous:
+        print("The update will revoke the previous version's broker permissions.", file=stream)
+    if plan["operation"] == "install" or operations or revoke_previous:
+        print("The plugin will be disabled after this change.", file=stream)
+    if operations:
+        _show_broker_plan(plan, preview=preview)
+
+
+def _show_broker_plan(plan: dict, *, preview: bool) -> None:
+    stream = sys.stdout if preview else sys.stderr
+    print("Broker permissions require separate administrator approval.", file=stream)
+    source = plan["source"]
+    if source["editable"] or source["kind"] in {"directory", "git"}:
+        print("Granting broker permissions requires installation from a prebuilt wheel.", file=stream)
+    elif not preview and sys.stdin.isatty():
+        print(
+            "If the system broker is available, you can choose which permissions to request "
+            "after installation.",
+            file=stream,
+        )
+    if preview:
+        for action, spec in sorted(plan["broker_operations"].items()):
+            kind = "Required" if action in plan["required"] else "Optional"
+            print(f"\n{kind} broker permission: {action}", file=stream)
+            print("\n".join(describe_operation(spec)), file=stream)
 
 
 def _plan(
@@ -109,15 +162,25 @@ def _plan(
             raise ValueError(
                 "Automatic update would downgrade the plugin; select a version explicitly"
             )
+        revoke_previous = False
+        if not args.json:
+            if operation == "update":
+                previous = installer._records(Path(plan["base"])).get(plan["id"], {})
+                revoke_previous = bool(previous.get("broker_operations"))
+            _show_installation_plan(plan, revoke_previous=revoke_previous, preview=args.dry_run)
         if args.dry_run:
             return plan
-        # In JSON mode emit a single document after activation.
-        print(json.dumps(plan, ensure_ascii=False, indent=2), file=sys.stderr)
-        _confirm(args, "Apply the installation plan?")
+        _confirm(args, _installation_prompt(plan))
         options = {"allow_migration": getattr(args, "allow_migration", False)}
         if plan.get("broker_operations") and not args.json:
             options["approve_permissions"] = approve
-        return installer.apply(plan, wheel, inventory, **options)
+        result = installer.apply(plan, wheel, inventory, **options)
+        if not args.json:
+            verb = "Installed" if operation == "install" else "Updated"
+            disabled = operation == "install" or plan["broker_operations"] or revoke_previous
+            suffix = " The plugin is disabled." if disabled else ""
+            print(f"{verb} {plan['id']} {plan['version']}.{suffix}")
+        return result
 
 
 def rollback(args, installer: Installer) -> int:
@@ -215,7 +278,7 @@ def run(args, installer: Installer) -> int:
             return _interactive(args, installer)
         case _:
             raise ValueError(f"Unknown installer action: {args.action}")
-    _output(args, result)
+    _output(args, result, human=args.action not in {"install", "update"})
     return 0
 
 
@@ -253,7 +316,7 @@ def _interactive(args, installer: Installer) -> int:
         raw = input("Package name, wheel, directory, or GitHub URL: ").strip()
         ref = input("Git revision (empty for other sources): ").strip() or None
         args.dry_run = False
-        _output(args, _plan(args, installer, resolve(raw, ref), "install"))
+        _plan(args, installer, resolve(raw, ref), "install")
     elif choice == "Check updates":
         args.pre = False
         _output(args, _outdated(args, installer))

@@ -12,6 +12,7 @@ from tempfile import NamedTemporaryFile
 from broker.actions import ACTIONS, OWNERS
 from broker.executor import run_command
 from broker.operations import check_executable
+from broker.permission_text import describe_operation
 from broker.policy import MAX_POLICY, POLICY_PATH, Grant, Policy, external_grant, load_policy
 from broker.protocol import CONTAINER_ID, IDENTIFIER, BrokerError, json_loads
 from broker.security import trusted
@@ -110,12 +111,18 @@ def _update_external(args: argparse.Namespace) -> bool:
             raise ValueError("Select at least one operation")
         for spec in record["operations"].values():
             check_executable(spec)
-        print(f"Approve external broker operations for {plugin}?")
-        print(json.dumps(record, indent=2, sort_keys=True), flush=True)
-        _show_docker_targets(record)
+        names = _docker_target_names(record)
+        print(f"Grant system broker permissions to {plugin}?", file=sys.stderr)
+        print(f"Wheel SHA-256: {record['sha256']}", file=sys.stderr)
+        for action, spec in sorted(record["operations"].items()):
+            print(f"\nPermission: {action}", file=sys.stderr)
+            print("\n".join(describe_operation(spec, names)), file=sys.stderr)
         with open("/dev/tty", encoding="utf-8") as terminal:
             print(
-                "Type 'approve' to update the system policy: ", end="", file=sys.stderr, flush=True
+                "\nType 'approve' to grant these permissions: ",
+                end="",
+                file=sys.stderr,
+                flush=True,
             )
             if terminal.readline(64).strip() != "approve":
                 return False
@@ -138,20 +145,20 @@ def _update_external(args: argparse.Namespace) -> bool:
     return True
 
 
-def _show_docker_targets(record: dict) -> None:
+def _docker_target_names(record: dict) -> dict[str, str]:
     ids = {
         container
         for spec in record["operations"].values()
         for container in spec.get("containers", [])
     }
     if not ids:
-        return
+        return {}
     action = ACTIONS["docker.containers.read"]
     containers = action.output(run_command(action.argv, action.timeout))
     names = {row["id"]: row["name"] for row in containers if row["id"] in ids}
     if ids - names.keys():
         raise ValueError("An approved Docker target is missing; enter current full container IDs")
-    print("Docker targets " + json.dumps(names, sort_keys=True), flush=True)
+    return names
 
 
 @contextmanager

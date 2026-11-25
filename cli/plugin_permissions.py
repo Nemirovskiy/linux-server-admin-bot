@@ -6,15 +6,38 @@ import sys
 
 from bot.broker_client import broker_grants
 from broker.entry import ADMIN
+from broker.permission_text import describe_operation
 from broker.policy import POLICY_PATH
 from broker.protocol import CONTAINER_ID
 from broker.transport import HELPER, SudoTransport
+
+_APPROVAL_MESSAGES = {
+    "approval_required": "Broker permissions require separate administrator approval.",
+    "broker_unavailable": "The system broker is unavailable.",
+    "editable": "Broker permissions require an installation from a prebuilt wheel.",
+    "prebuilt_wheel_required": "Broker permissions require an installation from a prebuilt wheel.",
+    "approval_failed": "Administrator approval could not be completed.",
+}
 
 
 def approve(plan: dict) -> str:
     definitions = plan.get("broker_operations", {})
     if not definitions:
         return "not_requested"
+    status = _approval_blocker(plan)
+    selected = {}
+    if status is None:
+        print(
+            f"\n{plan['id']} is installed and disabled. Choose which broker permissions to request.",
+            file=sys.stderr,
+        )
+        selected = _selected_operations(plan, definitions)
+        status = _request_approval(plan, selected) if selected else "declined"
+    _report_approval(plan, selected, status)
+    return status
+
+
+def _approval_blocker(plan: dict) -> str | None:
     if plan["source"]["editable"]:
         return "editable"
     if plan["source"]["kind"] in {"directory", "git"}:
@@ -23,11 +46,28 @@ def approve(plan: dict) -> str:
         return "broker_unavailable"
     if not sys.stdin.isatty():
         return "approval_required"
+    return None
 
-    selected = _selected_operations(plan, definitions)
-    if not selected:
-        return "declined"
 
+def _report_approval(plan: dict, selected: dict, status: str) -> None:
+    message = _APPROVAL_MESSAGES.get(status)
+    if message:
+        print(message, file=sys.stderr)
+    elif selected and status == "declined":
+        print("The administrator did not approve the selected permissions.", file=sys.stderr)
+
+    granted = set(selected) if status == "approved" else set()
+    skipped = plan["broker_operations"].keys() - granted
+    if granted:
+        print(f"Broker permissions granted: {', '.join(sorted(granted))}.", file=sys.stderr)
+    if skipped:
+        print(f"Broker permissions not granted: {', '.join(sorted(skipped))}.", file=sys.stderr)
+    missing = skipped.intersection(plan["required"])
+    if missing:
+        print(f"The plugin cannot load without: {', '.join(sorted(missing))}.", file=sys.stderr)
+
+
+def _request_approval(plan: dict, selected: dict) -> str:
     payload = json.dumps({"sha256": plan["sha256"], "operations": selected})
     try:
         result = _admin("approve-external", plan["id"], payload)
@@ -41,14 +81,20 @@ def approve(plan: dict) -> str:
 def _selected_operations(plan: dict, definitions: dict) -> dict:
     selected = {}
     for action in sorted(definitions):
-        kind = "required" if action in plan["required"] else "optional"
-        print(json.dumps({action: definitions[action]}, indent=2), file=sys.stderr)
+        spec = definitions[action]
+        required = action in plan["required"]
+        kind = "Required" if required else "Optional"
+        print(f"\n{kind} broker permission: {action}", file=sys.stderr)
+        print("\n".join(describe_operation(spec)), file=sys.stderr)
+        if required:
+            print("Without this permission, the plugin cannot load.", file=sys.stderr)
+        else:
+            print("Without this permission, the operation will be unavailable.", file=sys.stderr)
         try:
-            answer = input(f"Request administrator approval for {action} ({kind})? [y/N] ")
+            answer = input("Request administrator approval for this operation? [y/N] ")
         except EOFError:
             return {}
         if answer.strip().lower() in {"y", "yes"}:
-            spec = definitions[action]
             if "docker_action" in spec:
                 spec = _select_containers(spec)
                 if spec is None:
