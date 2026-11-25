@@ -64,9 +64,11 @@ From the checkout, run:
 Run it as the user who will run the bot. It requires Python 3.11+, virtual
 environment support and a user systemd session. On first run the script creates
 `.env`. Set your Telegram token and user ID there, then rerun the installer.
-It installs dependencies, checks the local block configuration and starts
-the user service. If switching an existing bot from Compose, stop its
-container before starting the native service.
+It builds and installs the native privilege broker using `sudo`, installs the
+Python dependencies, checks the local block configuration and starts the user
+service. Run it from a checkout you trust. To skip broker setup, use
+`./setup-native.sh --skip-broker`. If switching an existing bot from Compose,
+stop its container before starting the native service.
 
 Use `journalctl --user -u linux-server-admin-bot -f` to follow logs.
 To start at boot before login, enable lingering with

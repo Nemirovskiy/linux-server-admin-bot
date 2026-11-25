@@ -5,13 +5,15 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 project_dir=$(pwd -P)
 service=linux-server-admin-bot.service
 broker_bundle=
+skip_broker=false
 
-if (( $# )); then
-    if [[ $# != 2 || $1 != --broker-bundle || $2 != /* ]]; then
-        echo "Usage: ./setup-native.sh [--broker-bundle /path/to/root-owned-bundle]" >&2
-        exit 1
-    fi
+if [[ $# == 1 && $1 == --skip-broker ]]; then
+    skip_broker=true
+elif [[ $# == 2 && $1 == --broker-bundle && $2 == /* ]]; then
     broker_bundle=$2
+elif (( $# )); then
+    echo "Usage: ./setup-native.sh [--skip-broker | --broker-bundle /path/to/root-owned-bundle]" >&2
+    exit 1
 fi
 
 if (( EUID == 0 )); then
@@ -62,33 +64,98 @@ if grep -Eq 'your_bot_token_here|^TELEGRAM_ALLOWED_USER_IDS=123456789,987654321(
     exit 1
 fi
 
-if [[ -z $broker_bundle && -t 0 && ! -x /usr/local/libexec/lsab-broker/lsab-broker ]]; then
-    echo "To install the optional privilege broker, use a verified bundle staged by your administrator."
-    read -r -p "Absolute path to the broker bundle (Enter to skip): " broker_bundle || true
-fi
-if [[ -n $broker_bundle ]]; then
-    if [[ $broker_bundle != /* ]]; then
-        echo "Provide an absolute path to the root-owned broker bundle." >&2
-        exit 1
-    fi
-    # Check ownership as root before running the bundle, which may be under /root.
+install_broker() {
     /usr/bin/sudo -- /usr/bin/python3 -I -c '
+import io
 import os
 import stat
+import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
-installer = Path(sys.argv[1]) / "install.sh"
-if ".." in installer.parts:
-    raise SystemExit("Use an absolute bundle path without parent traversal")
-for path in (*reversed(installer.parents), installer):
-    info = path.lstat()
-    valid = stat.S_ISDIR(info.st_mode) if path != installer else stat.S_ISREG(info.st_mode)
-    if info.st_uid or info.st_mode & 0o022 or not valid:
-        raise SystemExit(f"Untrusted broker bundle path: {path}")
-os.execve("/bin/bash", ["/bin/bash", str(installer), sys.argv[2]],
-          {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"})
-' "$broker_bundle" "$(id -un)"
+def run_installer(directory):
+    installer = directory / "install.sh"
+    if not installer.is_absolute() or ".." in installer.parts:
+        raise SystemExit("Use an absolute bundle path without parent traversal")
+    for path in (*reversed(installer.parents), installer):
+        info = path.lstat()
+        valid = stat.S_ISDIR(info.st_mode) if path != installer else stat.S_ISREG(info.st_mode)
+        if info.st_uid or info.st_mode & 0o022 or not valid:
+            raise SystemExit(f"Untrusted broker bundle path: {path}")
+    return subprocess.run(
+        ["/bin/bash", str(installer), sys.argv[2]],
+        cwd="/",
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"},
+    ).returncode
+
+if sys.argv[1]:
+    raise SystemExit(run_installer(Path(sys.argv[1])))
+
+# Read the bundle through stdin so root never opens files in the working checkout.
+limit = 4 * 1024 * 1024
+payload = sys.stdin.buffer.read(limit + 1)
+if len(payload) > limit:
+    raise SystemExit("Broker bundle exceeds the size limit")
+expected = {"install.sh", "lsab-broker"}
+os.umask(0o077)
+with tempfile.TemporaryDirectory(prefix=".lsab-broker-", dir="/root") as stage:
+    directory = Path(stage)
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+        for member in archive:
+            if member.name not in expected or not member.isreg() or not 0 < member.size <= limit:
+                raise SystemExit("Invalid broker bundle member")
+            with archive.extractfile(member) as source, (directory / member.name).open("xb") as dest:
+                content = source.read()
+                if len(content) != member.size:
+                    raise SystemExit("Incomplete broker bundle member")
+                dest.write(content)
+            expected.remove(member.name)
+    if expected:
+        raise SystemExit("Incomplete broker bundle")
+    raise SystemExit(run_installer(directory))
+' "$1" "$(id -un)"
+}
+
+build_and_install_broker() (
+    bundle=$(mktemp -d)
+    trap 'rm -rf -- "$bundle"' EXIT
+    python3 packaging/broker/build.py "$bundle"
+    echo "Installing the system broker from this checkout. Use a checkout you trust."
+    tar -C "$bundle" -cf - install.sh lsab-broker | install_broker ""
+)
+
+if [[ $skip_broker == false ]]; then
+    if [[ -n $broker_bundle ]]; then
+        install_broker "$broker_bundle"
+    elif [[ ! -x /usr/local/libexec/lsab-broker/lsab-broker ||
+            ! -f /usr/local/sbin/lsab-broker-admin ]]; then
+        build_and_install_broker
+    fi
+    # Validate the installed helper and this user's access before changing .env.
+    python3 - <<'PY'
+import json
+import subprocess
+
+request = {
+    "protocol_version": 1,
+    "request_id": "a" * 16,
+    "plugin_id": "broker",
+    "action": "broker.status",
+    "params": {},
+}
+try:
+    result = subprocess.run(
+        ["/usr/bin/sudo", "-n", "--", "/usr/local/libexec/lsab-broker/lsab-broker"],
+        input=json.dumps(request), text=True, stdout=subprocess.PIPE, timeout=10,
+    )
+    available = result.returncode == 0 and json.loads(result.stdout).get("success") is True
+except (ValueError, AttributeError, OSError, subprocess.TimeoutExpired):
+    available = False
+if not available:
+    raise SystemExit("Broker is unavailable for this account. Fix its installation or use --skip-broker.")
+PY
     python3 - <<'PY'
 import re
 from pathlib import Path
